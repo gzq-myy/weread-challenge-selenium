@@ -1,10 +1,11 @@
 services:
   app:
-    image: jqknono/weread-challenge:latest
+    image: docker.1ms.run/gaohaha445/weread-challenge:latest
     pull_policy: always
     environment:
       - WEREAD_REMOTE_BROWSER=http://selenium:4444
-      - WEREAD_DURATION=68
+      - WEREAD_DURATION="20-75"
+      - WEREAD_KEYWORDS="明朝,三体"
     volumes:
       - ./data:/app/data
     depends_on:
@@ -14,7 +15,7 @@ services:
       - 119.29.29.29
       - 223.5.5.5
   selenium:
-    image: selenium/standalone-chrome:4.26
+    image: docker.1ms.run/selenium/standalone-chrome:4.26
     pull_policy: if_not_present
     shm_size: 2gb
     volumes:

@@ -2,24 +2,33 @@
 
 只为便宜一点买微信读书会员。
 
-![只为便宜一点买微信读书会员](https://img1.techfetch.dev/blog/202412261741639.gif)
-
 ## 快速开始
 
 ```bash
-# 创建工作目录
+# 1. 创建工作目录
 mkdir -p $HOME/weread-challenge && cd $HOME/weread-challenge
 
-# 下载配置文件
-wget https://raw.githubusercontent.com/jqknono/weread-challenge-selenium/main/docker-compose.yml
+# 2. 下载配置文件
+wget https://raw.githubusercontent.com/GaoHaHa-IronMan/weread-challenge-selenium/main/docker-compose.yml
 
-# 启动服务
+# 3. (可选) 修改配置
+# 使用你喜欢的编辑器（如 vim、nano）打开 docker-compose.yml 文件
+# nano docker-compose.yml
+#
+# 根据需要修改 environment 部分的配置:
+#   - WEREAD_DURATION: 阅读时长，可以是固定值(如 68)或范围(如 "60-90")
+#   - WEREAD_KEYWORDS: 选书关键词，用逗号分隔 (如 "三体,历史")
+#   - BARK_KEY: Bark 推送密钥
+#   - 更多配置请参考下文「可配置项」
+
+# 4. 启动服务
 docker compose up -d
 
-# 创建定时任务
+# 5. 创建定时任务
 (crontab -l 2>/dev/null; echo "00 */6 * * *  cd $HOME/weread-challenge && docker compose up -d") | crontab -
 
-# 扫描$HOME/weread-challenge/data下生成的登录二维码, 开始自动阅读
+# 6. 扫描二维码登录
+# 首次运行后，请检查 $HOME/weread-challenge/data 目录下的 login.png 文件，并使用微信扫描登录。
 ```
 
 ## 微信读书规则
@@ -46,8 +55,7 @@ docker compose up -d
 - 支持登录二维码刷新
 - 支持保存 cookies
 - 支持加载 cookies
-- 支持选择最近阅读的第 X 本书开始阅读
-- 默认随机选择一本书开始阅读
+- 支持根据关键词选书
 - 支持自动阅读
 - 支持跳到下一章
 - 支持读完跳回第一章继续阅读
@@ -85,10 +93,12 @@ cd $HOME/Documents/weread-challenge
 npm install selenium-webdriver
 
 # 下载脚本
-wget https://raw.githubusercontent.com/jqknono/weread-challenge-selenium/refs/heads/main/src/weread-challenge.js -O weread-challenge.js
+wget https://raw.githubusercontent.com/GaoHaHa-IronMan/weread-challenge-selenium/refs/heads/main/src/weread-challenge.js -O weread-challenge.js
 
 # 设置环境变量并运行
 export WEREAD_BROWSER="chrome"
+export WEREAD_KEYWORDS="明朝,三体"
+export WEREAD_DURATION="10-100"
 node weread-challenge.js
 ```
 
@@ -110,14 +120,14 @@ npm install nodemailer
 
 ### Docker Compose 运行
 
-```yaml
 services:
   app:
-    image: registry.techfetch.dev/jqknono/weread-challenge:latest
+    image: docker.1ms.run/gaohaha445/weread-challenge:latest
     pull_policy: always
     environment:
       - WEREAD_REMOTE_BROWSER=http://selenium:4444
-      - WEREAD_DURATION=68
+      - WEREAD_DURATION="20-75"
+      - WEREAD_KEYWORDS="明朝,三体"
     volumes:
       - ./data:/app/data
     depends_on:
@@ -175,15 +185,17 @@ docker run --restart always -d --name selenium-live \
 docker run --rm --name user-read \
   -v $HOME/weread-challenge/user/data:/app/data \
   -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 \
-  -e WEREAD_DURATION=68 \
-  registry.techfetch.dev/jqknono/weread-challenge:latest
+  -e WEREAD_DURATION="20-75" \
+  -e WEREAD_KEYWORDS="明朝,三体" \
+  docker.1ms.run/gaohaha445/weread-challenge:latest
 
 # 添加第二个用户
 docker run --rm --name user2-read \
   -v $HOME/weread-challenge/user2/data:/app/data \
   -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 \
-  -e WEREAD_DURATION=68 \
-  registry.techfetch.dev/jqknono/weread-challenge:latest
+  -e WEREAD_DURATION="20-75" \
+  -e WEREAD_KEYWORDS="明朝,三体" \
+  docker.1ms.run/gaohaha445/weread-challenge:latest
 ```
 
 首次启动后，需要微信扫描二维码登录，二维码保存在 `./data/login.png`
@@ -204,11 +216,12 @@ cd $WORKDIR
 cat > $WORKDIR/docker-compose.yml <<EOF
 services:
   app:
-    image: registry.techfetch.dev/jqknono/weread-challenge:latest
+    image: docker.1ms.run/gaohaha445/weread-challenge:latest
     pull_policy: always
     environment:
       - WEREAD_REMOTE_BROWSER=http://selenium:4444
-      - WEREAD_DURATION=68
+      - WEREAD_DURATION="20-75"
+      - WEREAD_KEYWORDS="明朝,三体"
     volumes:
       - ./data:/app/data
     depends_on:
@@ -232,7 +245,7 @@ services:
       retries: 10
 EOF
 # 首次启动后, 需微信扫描二维码登录, 二维码保存在 $HOME/weread-challenge/data/login.png
-# 每隔6个小时, 阅读68分钟
+# 每隔6个小时, 阅读20-75分钟
 (crontab -l 2>/dev/null; echo "00 */6 * * *  cd $WORKDIR && docker compose up -d") | crontab -
 ```
 
@@ -263,19 +276,19 @@ docker run --restart always -d --name selenium-live \
 WEREAD_USER="user"
 mkdir -p $HOME/weread-challenge/$WEREAD_USER/data
 # 首次启动后, 需微信扫描二维码登录, 二维码保存在 $HOME/weread-challenge/$WEREAD_USER/data/login.png
-# 每隔6个小时, 阅读68分钟
-(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER}-read -v $HOME/weread-challenge/${WEREAD_USER}/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER} registry.techfetch.dev/jqknono/weread-challenge:latest") | crontab -
+# 每隔6个小时, 阅读20-75分钟
+(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER}-read -v $HOME/weread-challenge/${WEREAD_USER}/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=\"20-75\" -e WEREAD_KEYWORDS=\"明朝,三体\" -e WEREAD_USER=${WEREAD_USER} docker.1ms.run/gaohaha445/weread-challenge:latest") | crontab -
 ```
 
 crontab 示例：
 
 ```bash
-00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_SELECTION=2 -e ENABLE_EMAIL=true -e EMAIL_SMTP=smtp.mail.me.com -e EMAIL_USER=user1@icloud.com -e EMAIL_PASS=aaaa-bbbb-cccc-dddd -e EMAIL_PORT=587 -e EMAIL_TO=weread-challege@outlook.com registry.techfetch.dev/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION="150-210" -e WEREAD_USER=user1 -e WEREAD_KEYWORDS="三体" -e ENABLE_EMAIL=true -e EMAIL_SMTP=smtp.mail.me.com -e EMAIL_USER=user1@icloud.com -e EMAIL_PASS=aaaa-bbbb-cccc-dddd -e EMAIL_PORT=587 -e EMAIL_TO=weread-challege@outlook.com docker.1ms.run/gaohaha445/weread-challenge:latest
 
-00 01 * * * docker run --rm --name user2-read -v /home/test/weread-challenge/user2/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user2 -e WEREAD_SELECTION=2 -e ENABLE_EMAIL=true -e EMAIL_SMTP=smtp.mail.me.com -e EMAIL_USER=user2@icloud.com -e EMAIL_PASS=aaaa-bbbb-cccc-dddd -e EMAIL_PORT=587 -e EMAIL_TO=weread-challege@outlook.com registry.techfetch.dev/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user2-read -v /home/test/weread-challenge/user2/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user2 -e WEREAD_KEYWORDS="三体" -e ENABLE_EMAIL=true -e EMAIL_SMTP=smtp.mail.me.com -e EMAIL_USER=user2@icloud.com -e EMAIL_PASS=aaaa-bbbb-cccc-dddd -e EMAIL_PORT=587 -e EMAIL_TO=weread-challege@outlook.com docker.1ms.run/gaohaha445/weread-challenge:latest
 
 # Bark推送示例（替换或添加Bark相关环境变量）
-00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_SELECTION=2 -e BARK_KEY=your-bark-key-here registry.techfetch.dev/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_KEYWORDS="三体" -e BARK_KEY=your-bark-key-here docker.1ms.run/gaohaha445/weread-challenge:latest
 ```
 
 ## Windows
@@ -357,12 +370,12 @@ WEREAD_USER2="user2"
 mkdir -p $HOME/weread-challenge/$WEREAD_USER1/data
 mkdir -p $HOME/weread-challenge/$WEREAD_USER2/data
 
-# 添加定时任务（每隔6个小时，阅读 68 分钟）
+# 添加定时任务（每隔6个小时，阅读 20-75 分钟）
 # 首次启动后需微信扫描二维码登录，二维码保存在：
 # $HOME/weread-challenge/${WEREAD_USER1}/data/login.png
 # $HOME/weread-challenge/${WEREAD_USER2}/data/login.png
-(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER1}-read -v $HOME/weread-challenge/${WEREAD_USER1}/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER1} registry.techfetch.dev/jqknono/weread-challenge:latest") | crontab -
-(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER2}-read -v $HOME/weread-challenge/${WEREAD_USER2}/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER2} registry.techfetch.dev/jqknono/weread-challenge:latest") | crontab -
+(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER1}-read -v $HOME/weread-challenge/${WEREAD_USER1}/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=\"20-75\" -e WEREAD_USER=${WEREAD_USER1} docker.1ms.run/gaohaha445/weread-challenge:latest") | crontab -
+(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER2}-read -v $HOME/weread-challenge/${WEREAD_USER2}/data:/app/data --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=\"20-75\" -e WEREAD_USER=${WEREAD_USER2} docker.1ms.run/gaohaha445/weread-challenge:latest") | crontab -
 ```
 
 ## 可配置项
@@ -371,9 +384,9 @@ mkdir -p $HOME/weread-challenge/$WEREAD_USER2/data
 | ----------------------- | ---------------- | ------------------------------ | ---------------- |
 | `WEREAD_USER`           | `weread-default` | -                              | 用户标识         |
 | `WEREAD_REMOTE_BROWSER` | ""               | -                              | 远程浏览器地址   |
-| `WEREAD_DURATION`       | `10`             | -                              | 阅读时长         |
+| `WEREAD_DURATION`       | `10`             | `30`, `20-40`                  | 阅读时长(分钟), 支持固定值或范围随机 |
 | `WEREAD_SPEED`          | `slow`           | `slow,normal,fast`             | 阅读速度         |
-| `WEREAD_SELECTION`      | `random`         | -1,[0-4]                       | 选择阅读的书籍, -1表示阅读"胆小如鼠"   |
+| `WEREAD_KEYWORDS`       | `""`             | `"三体,明朝"`                  | 从书架里选书的关键词,逗号分隔。留空则读《生死疲劳》 |
 | `WEREAD_BROWSER`        | `chrome`         | `chrome,MicrosoftEdge,firefox` | 浏览器           |
 | `ENABLE_EMAIL`          | `false`          | `true,false`                   | 邮件通知         |
 | `EMAIL_SMTP`            | ""               | -                              | 邮箱 SMTP 服务器 |
@@ -398,7 +411,7 @@ docker buildx create --name weread-challenge
 docker buildx use weread-challenge
 docker buildx inspect --bootstrap
 docker buildx build --platform linux/amd64,linux/arm64 -t jqknono/weread-challenge:base -f Dockerfile.base --push .
-docker buildx build --platform linux/amd64,linux/arm64 -t registry.techfetch.dev/jqknono/weread-challenge:latest -f Dockerfile.quick --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t docker.1ms.run/gaohaha445/weread-challenge:latest -f Dockerfile.quick --push .
 ``` -->
 
 ## 注意事项
@@ -423,8 +436,5 @@ docker buildx build --platform linux/amd64,linux/arm64 -t registry.techfetch.dev
   - 本工具纯 JavaScript 实现，第三方可以继续开发。即使信任本工具，也应在使用自动化工具时，经常确认登录设备，避免书架被恶意操作
 
 ## 参考
-
-- 脚本下载链接: [weread-challenge.js](https://raw.githubusercontent.com/jqknono/weread-challenge-selenium/refs/heads/main/src/weread-challenge.js)
-- 开源地址: [https://github.com/jqknono/weread-challenge-selenium](https://github.com/jqknono/weread-challenge-selenium)
 - 统计: [https://weread-challenge.techfetch.dev](https://weread-challenge.techfetch.dev)
 - 文章来源: [https://blog.techfetch.dev](https://blog.techfetch.dev/blog/2024/12/05/%E5%BE%AE%E4%BF%A1%E8%AF%BB%E4%B9%A6%E8%87%AA%E5%8A%A8%E6%89%93%E5%8D%A1%E5%88%B7%E6%97%B6%E9%95%BF/)

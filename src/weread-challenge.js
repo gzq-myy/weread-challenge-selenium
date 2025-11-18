@@ -17,14 +17,39 @@ const http = require("http");
 const { execSync, spawnSync } = require("child_process");
 const os = require("os");
 
-const WEREAD_VERSION = "0.12.0";
+const WEREAD_VERSION = "0.13.0";
 const COOKIE_FILE = "./data/cookies.json"; // Path to save/load cookies
 const LOGIN_QR_CODE = "./data/login.png"; // Path to save login QR code
 const URL = "https://weread.qq.com/"; // Replace with the target URL
 const DEBUG = process.env.DEBUG === "true" || false; // Enable debug mode
 const WEREAD_USER = process.env.WEREAD_USER || "weread-default"; // User to use
 const WEREAD_REMOTE_BROWSER = process.env.WEREAD_REMOTE_BROWSER;
-const WEREAD_DURATION = process.env.WEREAD_DURATION || 10; // Reading duration in minutes
+const WEREAD_DURATION_CONFIG = process.env.WEREAD_DURATION || "10"; // Reading duration in minutes, can be a range like "10-20"
+let WEREAD_DURATION;
+if (String(WEREAD_DURATION_CONFIG).includes("-")) {
+  const [min, max] = String(WEREAD_DURATION_CONFIG)
+    .split("-")
+    .map((s) => parseInt(s.trim()));
+  if (!isNaN(min) && !isNaN(max) && min <= max) {
+    WEREAD_DURATION = Math.floor(Math.random() * (max - min + 1)) + min;
+    console.info(
+      `Reading duration range: ${min}-${max} minutes. This run will be ${WEREAD_DURATION} minutes.`
+    );
+  } else {
+    WEREAD_DURATION = 10;
+    console.warn(
+      `Invalid reading duration range: "${WEREAD_DURATION_CONFIG}". Defaulting to 10 minutes.`
+    );
+  }
+} else {
+  WEREAD_DURATION = parseInt(WEREAD_DURATION_CONFIG, 10);
+  if (isNaN(WEREAD_DURATION) || WEREAD_DURATION <= 0) {
+    WEREAD_DURATION = 10;
+    console.warn(
+      `Invalid reading duration: "${WEREAD_DURATION_CONFIG}". Defaulting to 10 minutes.`
+    );
+  }
+}
 const WEREAD_SPEED = process.env.WEREAD_SPEED || "slow"; // Reading speed, slow | normal | fast
 const WEREAD_BROWSER = process.env.WEREAD_BROWSER || Browser.CHROME; // Browser to use, chrome | MicrosoftEdge | firefox
 const ENABLE_EMAIL = process.env.ENABLE_EMAIL === "true" || false; // Enable email notifications
@@ -1001,7 +1026,7 @@ async function main() {
     // Book selection logic starts
     let isBookReady = false;
     let selectedBookTitle = "Unknown Book";
-    const DEFAULT_MOUSE_BOOK_URL = "https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7";
+    const DEFAULT_MOUSE_BOOK_URL = "https://weread.qq.com/web/reader/c2f320f071935f63c2f1313";
     // Use the correct selector for books on the shelf
     const allBooks = await driver.findElements(By.css("a.shelfBook"));
 
