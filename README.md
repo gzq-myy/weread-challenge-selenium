@@ -9,7 +9,7 @@
 mkdir -p $HOME/weread-challenge && cd $HOME/weread-challenge
 
 # 2. 下载配置文件
-wget https://raw.githubusercontent.com/GaoHaHa-IronMan/weread-challenge-selenium/main/docker-compose.yml
+wget https://raw.githubusercontent.com/gzq-myy/weread-challenge-selenium/main/docker-compose.yml
 
 # 3. (可选) 修改配置
 # 使用你喜欢的编辑器（如 vim、nano）打开 docker-compose.yml 文件
@@ -17,15 +17,15 @@ wget https://raw.githubusercontent.com/GaoHaHa-IronMan/weread-challenge-selenium
 #
 # 根据需要修改 environment 部分的配置:
 #   - WEREAD_DURATION: 阅读时长，可以是固定值(如 68)或范围(如 "60-90")
-#   - WEREAD_KEYWORDS: 选书关键词，用逗号分隔 (如 "三体,历史")
-#   - BARK_KEY: Bark 推送密钥
+#   - WEREAD_KEYWORDS: 选书关键词,需要在书架中，用逗号分隔 (如 "三体,历史")
+#   - BARK_KEY: Bark 推送密钥，可以不设置
 #   - 更多配置请参考下文「可配置项」
 
 # 4. 启动服务
 docker compose up -d
 
 # 5. 创建定时任务
-(crontab -l 2>/dev/null; echo "00 */6 * * *  cd $HOME/weread-challenge && docker compose up -d") | crontab -
+(crontab -l 2>/dev/null; echo "00 */6 * * *  cd $HOME/weread-challenge && docker compose up -d > $HOME/weread-challenge/cron.log 2>&1") | crontab -
 
 # 6. 扫描二维码登录
 # 首次运行后，请检查 $HOME/weread-challenge/data 目录下的 login.png 文件，并使用微信扫描登录。
@@ -93,7 +93,7 @@ cd $HOME/Documents/weread-challenge
 npm install selenium-webdriver
 
 # 下载脚本
-wget https://raw.githubusercontent.com/GaoHaHa-IronMan/weread-challenge-selenium/refs/heads/main/src/weread-challenge.js -O weread-challenge.js
+wget https://raw.githubusercontent.com/gzq-myy/weread-challenge-selenium/refs/heads/main/src/weread-challenge.js -O weread-challenge.js
 
 # 设置环境变量并运行
 export WEREAD_BROWSER="chrome"
@@ -422,7 +422,6 @@ docker buildx build --platform linux/amd64,linux/arm64 -t docker.1ms.run/gaohaha
 - **邮件通知**：邮件通知可能被识别为垃圾邮件，建议在收件方添加白名单
 - **Bark推送**：Bark推送依赖iOS设备上的Bark App，只需设置BARK_KEY即可启用，无需额外开关，支持自定义Bark服务器
 - **使用声明**：本项目仅供学习交流使用，请勿用于商业用途，请勿用于违法用途
-- **侵权处理**：如存在可能的侵权，请联系 `weread-challenge@techfetch.dev`，本项目会立即删除
 
 ## 隐私政策
 
