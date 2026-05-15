@@ -1,22 +1,19 @@
 services:
   app:
-    image: docker.1ms.run/gaohaha445/weread-challenge:latest
+    image: jqknono/weread-challenge:latest
     pull_policy: always
     environment:
       - WEREAD_REMOTE_BROWSER=http://selenium:4444
-      - WEREAD_DURATION=20-75
-      - WEREAD_KEYWORDS=明朝,三体
+      - WEREAD_DURATION=68
     volumes:
-      - ./data:/app/data
+      - ./.weread:/app/.weread
     depends_on:
       selenium:
         condition: service_healthy
     dns:
-      - 119.29.29.29
       - 223.5.5.5
   selenium:
-    # platform: linux/amd64 # 在 ARM 架构上 的Mac 平台运行时需要指定
-    image: docker.1ms.run/selenium/standalone-chrome:4.26
+    image: selenium/standalone-chromium:latest
     pull_policy: if_not_present
     shm_size: 2gb
     volumes:
@@ -25,8 +22,10 @@ services:
       - SE_ENABLE_TRACING=false
       - SE_BIND_HOST=false
       - SE_JAVA_DISABLE_HOSTNAME_VERIFICATION=false
+    dns:
+      - 223.5.5.5
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
+      test: ["CMD", "curl", "-f", "http://selenium:4444/status"]
       interval: 5s
       timeout: 60s
       retries: 10
