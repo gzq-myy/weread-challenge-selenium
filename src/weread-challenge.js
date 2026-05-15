@@ -8,6 +8,8 @@
  * 修改请保留统计代码
  */
 
+require("dotenv").config({ quiet: true });
+
 const { By, Builder, Browser, until, Key } = require("selenium-webdriver");
 const assert = require("assert");
 const fs = require("fs");
@@ -54,6 +56,7 @@ let EMAIL_PORT = 465; // SMTP port number, default 465
 let BARK_KEY = ""; // Bark推送密钥
 let BARK_SERVER = "https://api.day.app"; // Bark服务器地址
 let WEREAD_DATA_DIR = ".weread"; // 默认数据目录
+let WEREAD_KEYWORDS = ""; // 关键词选书，逗号分隔
 let DEFAULT_BOOK_URL =
   "https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7"; // 默认阅读链接
 // env vars:
@@ -70,6 +73,7 @@ let DEFAULT_BOOK_URL =
 // BARK_KEY
 // BARK_SERVER
 // WEREAD_DATA_DIR
+// WEREAD_KEYWORDS
 // DEFAULT_BOOK_URL
 
 const RUN_OPTION_SPECS = [
@@ -127,6 +131,59 @@ function parseIntegerValue(value, flagName) {
   return parsed;
 }
 
+function parseDurationValue(value, defaultValue = 10, options = {}) {
+  const quiet = options.quiet === true;
+  const rawValue = String(value ?? defaultValue).trim();
+
+  if (rawValue.includes("-")) {
+    const [minText, maxText] = rawValue.split("-").map((item) => item.trim());
+    const min = Number.parseInt(minText, 10);
+    const max = Number.parseInt(maxText, 10);
+    const isValidRange =
+      Number.isInteger(min) &&
+      Number.isInteger(max) &&
+      min > 0 &&
+      max > 0 &&
+      min <= max;
+
+    if (!isValidRange) {
+      if (!quiet) {
+        console.warn(
+          `Invalid reading duration range: "${rawValue}". Defaulting to ${defaultValue} minutes.`
+        );
+      }
+      return defaultValue;
+    }
+
+    const duration = Math.floor(Math.random() * (max - min + 1)) + min;
+    if (!quiet) {
+      console.info(
+        `Reading duration range: ${min}-${max} minutes. This run will be ${duration} minutes.`
+      );
+    }
+    return duration;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    if (!quiet) {
+      console.warn(
+        `Invalid reading duration: "${rawValue}". Defaulting to ${defaultValue} minutes.`
+      );
+    }
+    return defaultValue;
+  }
+
+  return parsed;
+}
+
+function parseKeywordList(rawKeywords) {
+  return String(rawKeywords || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 function resolveDefaultDataDir(cwd = process.cwd()) {
   const preferredDir = ".weread";
   const legacyDir = "data";
@@ -143,13 +200,13 @@ function resolveDefaultDataDir(cwd = process.cwd()) {
   return preferredDir;
 }
 
-function setRuntimeConfigFromEnv(env = process.env) {
+function setRuntimeConfigFromEnv(env = process.env, options = {}) {
   DEBUG = parseBooleanValue(env.DEBUG, false, false);
   WEREAD_USER = env.WEREAD_USER || "weread-default";
   WEREAD_REMOTE_BROWSER = env.WEREAD_REMOTE_BROWSER || "";
   WEREAD_DURATION = env.WEREAD_DURATION === undefined
     ? 10
-    : parseIntegerValue(env.WEREAD_DURATION, "weread-duration");
+    : parseDurationValue(env.WEREAD_DURATION, 10, options);
   WEREAD_SPEED = env.WEREAD_SPEED || "slow";
   WEREAD_SELECTION = env.WEREAD_SELECTION === undefined
     ? 2
@@ -168,6 +225,7 @@ function setRuntimeConfigFromEnv(env = process.env) {
   BARK_KEY = env.BARK_KEY || "";
   BARK_SERVER = env.BARK_SERVER || "https://api.day.app";
   WEREAD_DATA_DIR = env.WEREAD_DATA_DIR || resolveDefaultDataDir();
+  WEREAD_KEYWORDS = env.WEREAD_KEYWORDS || "";
   DEFAULT_BOOK_URL =
     env.DEFAULT_BOOK_URL ||
     "https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7";
@@ -213,7 +271,7 @@ function getRunOptionsHelpLines() {
   ).join("\n");
 }
 
-setRuntimeConfigFromEnv(process.env);
+setRuntimeConfigFromEnv(process.env, { quiet: true });
 
 function getDataDirPath() {
   return path.resolve(WEREAD_DATA_DIR);
@@ -1846,24 +1904,60 @@ async function runMain() {
       console.info("WEREAD_SELECTION=-1，直接打开 DEFAULT_BOOK_URL:", DEFAULT_BOOK_URL);
       await driver.get(DEFAULT_BOOK_URL);
     } else {
+      const books = await driver.findElements(
+        By.xpath("//div[@class='wr_index_mini_shelf_card']"),
+        10000
+      );
+      const keywords = parseKeywordList(WEREAD_KEYWORDS);
+
+      if (WEREAD_KEYWORDS && keywords.length === 0) {
+        console.warn("WEREAD_KEYWORDS 已设置，但清洗后没有有效关键词，将回退到常规选书逻辑。");
+      }
+
+      if (keywords.length > 0) {
+        const matchedBooks = [];
+        console.info(`Using keywords to find a book: [${keywords.join(", ")}]`);
+        for (const book of books) {
+          try {
+            const titleElement = await book.findElement(By.css("div.title"));
+            const title = await titleElement.getText();
+            if (keywords.some((keyword) => title.includes(keyword))) {
+              matchedBooks.push({ element: book, title });
+            }
+          } catch (error) {
+            console.debug("Could not resolve book title for keyword matching:", error.message);
+          }
+        }
+
+        if (matchedBooks.length === 0) {
+          const errorMessage = `No books found on the shelf matching keywords: [${WEREAD_KEYWORDS}].`;
+          console.error(errorMessage);
+          await sendBark("微信读书挑战", errorMessage, {
+            subtitle: "项目停滞",
+            level: "critical",
+            sound: "alarm"
+          });
+          return;
+        }
+
+        const matchedBook = matchedBooks[Math.floor(Math.random() * matchedBooks.length)];
+        await matchedBook.element.click();
+        console.info(`Randomly selected to read: "${matchedBook.title}"`);
+      } else {
       if (selection === 0) {
         // random selection between 1 and 4
         selection = Math.floor(Math.random() * 4) + 1;
       }
-      let books = await driver.findElements(
-        // By.xpath("(//div[@class='wr_index_mini_shelf_card'])[" + selection + "]"),
-        By.xpath("//div[@class='wr_index_mini_shelf_card']"),
-        10000
-      );
-      if (books.length > 0 && books.length < selection) {
-        await books[0].click();
-        console.info("Clicked on the first book.");
-      } else if (books.length >= selection) {
-        await books[selection - 1].click();
-        console.info("Clicked on the ", selection, "th book.");
-      } else {
-        console.warn("No book link found. Using the default link.");
-        await driver.get(DEFAULT_BOOK_URL);
+        if (books.length > 0 && books.length < selection) {
+          await books[0].click();
+          console.info("Clicked on the first book.");
+        } else if (books.length >= selection) {
+          await books[selection - 1].click();
+          console.info("Clicked on the ", selection, "th book.");
+        } else {
+          console.warn("No book link found. Using the default link.");
+          await driver.get(DEFAULT_BOOK_URL);
+        }
       }
     }
 
@@ -2084,7 +2178,7 @@ async function runMain() {
     // Add line number to error message if possible
     let errorMessage = String(e?.message || e || "Unknown error");
     if (e && e.stack) {
-      const match = e.stack.match(/(src\/main.js):(\d+):(\d+)/);
+      const match = e.stack.match(/(src[\\/]weread-challenge\.js):(\d+):(\d+)/);
       if (match) {
         errorMessage += ` (at ${match[1]}:${match[2]})`;
       }
@@ -2134,6 +2228,7 @@ function getRuntimeConfigSnapshot() {
     BARK_KEY,
     BARK_SERVER,
     WEREAD_DATA_DIR,
+    WEREAD_KEYWORDS,
     DEFAULT_BOOK_URL,
     EMAIL_SMTP: process.env.EMAIL_SMTP || "",
     EMAIL_USER: process.env.EMAIL_USER || "",
