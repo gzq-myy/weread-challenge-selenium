@@ -16,6 +16,7 @@ Commands:
   help                      Show this help message
   check                     Validate resolved Docker image config
   build                     Build the Docker image locally
+  save                      Build the Docker image locally and export it as a tar archive
   push                      Build and push the Docker image
 
 Options:
@@ -29,10 +30,13 @@ Options:
                             default: Dockerfile
   --context <path>          Docker build context
                             default: .
+  --output <path>           Output tar path for save command
+                            default: <image-name>-<tag>.tar in project root
 
 Examples:
   node scripts/docker-image.js check
   node scripts/docker-image.js build --tag latest
+  node scripts/docker-image.js save --platform linux/amd64 --tag latest
   node scripts/docker-image.js push --tag ${packageJson.version}
   npm run docker:image:push -- --tag ${packageJson.version}
   npm run docker:image:push:dev`);
@@ -52,7 +56,7 @@ function parseArgs(argv) {
   const normalizedCommand = ['-h', '--help'].includes(commandToken)
     ? 'help'
     : commandToken;
-  const commands = new Set(['help', 'check', 'build', 'push']);
+  const commands = new Set(['help', 'check', 'build', 'save', 'push']);
 
   if (!commands.has(normalizedCommand)) {
     fail(`Unknown command: ${commandToken}`);
@@ -65,7 +69,8 @@ function parseArgs(argv) {
     '--extra-tags',
     '--platform',
     '--dockerfile',
-    '--context'
+    '--context',
+    '--output'
   ]);
 
   for (let i = 0; i < rest.length; i += 1) {
@@ -103,6 +108,7 @@ function resolveConfig(rawOptions) {
   const dockerfile = path.resolve(ROOT_DIR, rawOptions.dockerfile || process.env.DOCKERFILE || 'Dockerfile');
   const context = path.resolve(ROOT_DIR, rawOptions.context || process.env.DOCKER_CONTEXT || '.');
   const platform = rawOptions.platform || process.env.DOCKER_PLATFORM || '';
+  const output = rawOptions.output || process.env.DOCKER_OUTPUT || '';
 
   if (!image) {
     fail('Docker image name is required');
@@ -123,8 +129,25 @@ function resolveConfig(rawOptions) {
     extraTags: extraTags.filter((item) => item !== tag),
     dockerfile,
     context,
-    platform
+    platform,
+    output
   };
+}
+
+function sanitizeFileName(value) {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, '-');
+}
+
+function resolveSaveOutput(config) {
+  if (config.command !== 'save') {
+    return '';
+  }
+  if (config.output) {
+    return path.resolve(ROOT_DIR, config.output);
+  }
+  const imageName = sanitizeFileName(config.image.split('/').pop() || 'image');
+  const tagName = sanitizeFileName(config.tag);
+  return path.join(ROOT_DIR, `${imageName}-${tagName}.tar`);
 }
 
 function ensureDockerAvailable() {
@@ -164,6 +187,9 @@ function printConfig(config) {
   console.log(`dockerfile: ${config.dockerfile}`);
   console.log(`context: ${config.context}`);
   console.log(`platform: ${config.platform || '(default)'}`);
+  if (config.command === 'save') {
+    console.log(`output: ${config.output}`);
+  }
 }
 
 function resolvePushTags(config) {
@@ -201,6 +227,7 @@ function main() {
   config.command = command;
   config.pushTags = resolvePushTags(config);
   config.buildTags = command === 'push' ? config.pushTags : uniqueTags([config.tag, ...config.extraTags]);
+  config.output = resolveSaveOutput(config);
   ensureDockerAvailable();
   printConfig(config);
 
@@ -212,6 +239,15 @@ function main() {
   const buildArgs = buildCommandArgs(config);
   console.log(`running: docker ${buildArgs.join(' ')}`);
   runCommand('docker', buildArgs);
+
+  if (command === 'save') {
+    const imageRef = `${config.image}:${config.tag}`;
+    fs.mkdirSync(path.dirname(config.output), { recursive: true });
+    const saveArgs = ['save', '-o', config.output, imageRef];
+    console.log(`running: docker ${saveArgs.join(' ')}`);
+    runCommand('docker', saveArgs);
+    return;
+  }
 
   if (command !== 'push') {
     return;

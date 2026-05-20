@@ -184,6 +184,76 @@ function parseKeywordList(rawKeywords) {
     .filter((item) => item.length > 0);
 }
 
+async function resolveBookCardTitle(driver, book) {
+  const candidateSelectors = [
+    "div.title",
+    "[class*='title']",
+    "a[title]",
+    "img[alt]",
+  ];
+  const candidateAttributes = ["title", "aria-label", "alt"];
+
+  for (const selector of candidateSelectors) {
+    const elements = await book.findElements(By.css(selector));
+    for (const element of elements) {
+      const values = [];
+
+      try {
+        values.push(await element.getText());
+      } catch (_) {}
+
+      for (const attribute of candidateAttributes) {
+        try {
+          values.push(await element.getAttribute(attribute));
+        } catch (_) {}
+      }
+
+      const title = values.map((value) => String(value || "").trim()).find(Boolean);
+      if (title) {
+        return title;
+      }
+    }
+  }
+
+  try {
+    const rawText = await driver.executeScript(
+      "return arguments[0]?.innerText || arguments[0]?.textContent || '';",
+      book
+    );
+    const lines = String(rawText || "")
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (lines.length > 0) {
+      return lines[0];
+    }
+  } catch (_) {}
+
+  return "";
+}
+
+async function detectShelfLoginState(driver) {
+  try {
+    const currentUrl = await driver.getCurrentUrl();
+    if (String(currentUrl || "").includes("/web/shelf")) {
+      return { loggedIn: true, reason: `url=${currentUrl}` };
+    }
+  } catch (_) {}
+
+  try {
+    const markers = await driver.findElements(
+      By.xpath(
+        "//*[contains(text(), '我的书架') or contains(@href, '/web/shelf') or contains(@class, 'wr_index_mini_shelf_card')]"
+      )
+    );
+    if (markers.length > 0) {
+      return { loggedIn: true, reason: "shelf marker found" };
+    }
+  } catch (_) {}
+
+  return { loggedIn: false, reason: "" };
+}
+
 function resolveDefaultDataDir(cwd = process.cwd()) {
   const preferredDir = ".weread";
   const legacyDir = "data";
@@ -917,14 +987,14 @@ async function safeClickElement(driver, element, description = "元素") {
       await driver.executeScript("arguments[0].scrollIntoView({block: 'center'});", element);
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    
+
     // 尝试直接点击
     await element.click();
     console.info(`成功点击${description}`);
     return true;
   } catch (error) {
     console.warn(`直接点击${description}失败: ${error.message}`);
-    
+
     try {
       // 尝试使用JavaScript点击
       console.info(`尝试使用JavaScript点击${description}`);
@@ -933,7 +1003,7 @@ async function safeClickElement(driver, element, description = "元素") {
       return true;
     } catch (jsError) {
       console.warn(`使用JavaScript点击${description}失败: ${jsError.message}`);
-      
+
       try {
         // 尝试使用Actions类模拟点击
         console.info(`尝试使用Actions类点击${description}`);
@@ -953,7 +1023,7 @@ async function safeClickElement(driver, element, description = "元素") {
 async function refreshQRCode(driver) {
   try {
     console.info("开始刷新二维码...");
-    
+
     // 尝试多种方式找到刷新按钮
     const refreshLocators = [
       By.css(".login_dialog_retry_delegate"),
@@ -965,10 +1035,10 @@ async function refreshQRCode(driver) {
       By.xpath("//button[contains(text(), '刷新')]"),
       By.xpath("//span[contains(text(), '刷新')]")
     ];
-    
+
     let refreshClicked = false;
     let refreshElement = null;
-    
+
     // 尝试每个定位器
     for (const locator of refreshLocators) {
       try {
@@ -989,7 +1059,7 @@ async function refreshQRCode(driver) {
         console.debug(`未找到元素: ${locator.toString()}`);
       }
     }
-    
+
     if (!refreshClicked) {
       console.warn("常规定位失败，尝试执行脚本触发刷新");
       try {
@@ -1006,13 +1076,13 @@ async function refreshQRCode(driver) {
         return false;
       }
     }
-    
+
     // 等待页面加载
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    
+
     // 检查二维码是否已刷新
     let qrElementFound = await findQRCodeElement(driver);
-    
+
     if (qrElementFound) {
       // 避免截图时二维码还未弹出
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -1035,11 +1105,11 @@ async function refreshQRCode(driver) {
 
 async function sendMail(subject, text, filePaths = [], options = {}) {
   const nodemailer = require("nodemailer");
-  
+
   // 根据端口自动判断是否使用SSL
   // 通常 465 使用 SSL，587 和 25 不使用
   const secure = EMAIL_PORT === 465;
-  
+
   // Create transporter object using SMTP transport
   let transporter = nodemailer.createTransport({
     host: process.env.EMAIL_SMTP,
@@ -1775,13 +1845,13 @@ async function runMain() {
       // 避免点击不成功
       await new Promise((resolve) => setTimeout(resolve, 1000));
       await loginLinks[0].click();
-      
+
       // 等待页面加载
       await new Promise((resolve) => setTimeout(resolve, 2000));
-      
+
       // 使用简化的二维码定位函数
       let qrElementFound = await findQRCodeElement(driver);
-      
+
       // 如果找到任何二维码相关元素，保存截图
       if (qrElementFound) {
         // 避免截图时二维码还未弹出
@@ -1802,12 +1872,17 @@ async function runMain() {
       "//div[contains(text(), '点击刷新二维码') and @class='wr_login_modal_qr_overlay_text']"
     );
     let locator2 = By.xpath(
-      "//div[contains(text(), '我的书架') and @class='wr_index_page_top_section_header_action_link']"
+      "//*[contains(text(), '我的书架') or contains(@href, '/web/shelf') or contains(@class, 'wr_index_mini_shelf_card')]"
     );
 
     let maxRetries = 3;
     while (maxRetries-- > 0) {
       console.info("Waiting for login...");
+      const shelfState = await detectShelfLoginState(driver);
+      if (shelfState.loggedIn) {
+        console.info("Login completed.", shelfState.reason);
+        break;
+      }
       const element = await driver.wait(
         new Promise((resolve, reject) => {
           driver
@@ -1834,6 +1909,12 @@ async function runMain() {
         break;
       }
 
+      const currentShelfState = await detectShelfLoginState(driver);
+      if (currentShelfState.loggedIn) {
+        console.info("Login completed.", currentShelfState.reason);
+        break;
+      }
+
       // 如果出现二维码过期提示，则自动刷新
       if (QR_EXPIRED_TEXTS.some((expiredText) => text.includes(expiredText))) {
         console.info("Refreshing QR code...");
@@ -1844,7 +1925,7 @@ async function runMain() {
           // 如果刷新失败，尝试直接刷新页面
           await driver.navigate().refresh();
           await new Promise((resolve) => setTimeout(resolve, 3000));
-          
+
           // 再次检查二维码
           let qrElementFound = await findQRCodeElement(driver);
           if (qrElementFound) {
@@ -1919,8 +2000,11 @@ async function runMain() {
         console.info(`Using keywords to find a book: [${keywords.join(", ")}]`);
         for (const book of books) {
           try {
-            const titleElement = await book.findElement(By.css("div.title"));
-            const title = await titleElement.getText();
+            const title = await resolveBookCardTitle(driver, book);
+            if (!title) {
+              console.debug("Could not resolve book title for keyword matching: empty title");
+              continue;
+            }
             if (keywords.some((keyword) => title.includes(keyword))) {
               matchedBooks.push({ element: book, title });
             }
