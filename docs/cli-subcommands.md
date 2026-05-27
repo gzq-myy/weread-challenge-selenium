@@ -4,7 +4,7 @@
 
 | 子命令 | 职责 | 输入 | 输出 | 依赖 | 关键约束 |
 | --- | --- | --- | --- | --- | --- |
-| `run` | 执行现有自动阅读主流程 | 环境变量 | 控制台日志、截图、邮件、Bark | `selenium-webdriver`、邮件/Bark 配置 | 保持现有主流程行为 |
+| `run` | 执行现有自动阅读主流程 | 环境变量 | 控制台日志、截图、Bark、Webhook | `selenium-webdriver`、Bark/Webhook 配置 | 保持现有主流程行为 |
 | `schedule` | 生成周期性计划任务命令 | `--name` `--every` `--workdir` `--platform` `--weread-duration` `--dry-run` | 创建命令、验证命令、回滚命令、权限提示 | `schtasks` / `launchctl` / `systemd --user` | 仅支持向 `run` 追加 `--weread-duration`；`--workdir` 可选，默认当前用户 `HOME` |
 | `help` / `-h` / `--help` | 输出 CLI 帮助 | 可选子命令名 | 帮助文本 | 无 | 不触发主流程 |
 
@@ -44,19 +44,23 @@ flowchart TD
 | `schedule` 运行参数 | `schedule` 只允许附加 `--weread-duration`，其余 `run` 参数必须通过环境变量提供 |
 | Windows 重复持续时间 | Windows `schedule` 固定输出 `/DU 8760:00`，以满足 `schtasks` 对 `/RI` 的要求 |
 | 权限提示 | Windows 创建命令若报 `Access is denied`，需在管理员终端中执行 |
-| 默认数据目录 | 未设置 `WEREAD_DATA_DIR` 时，优先使用已存在的 `.weread`，其次复用已存在的 `data`，否则新建 `.weread` |
+| 默认数据目录 | 未设置 `WEREAD_DATA_DIR` 时，固定使用当前工作目录下的 `.weread` |
 
 ### `run` 参数映射
 
 | 参数 | 对应环境变量 | 说明 |
 | --- | --- | --- |
+| `--debug` | `DEBUG` | 开启调试日志 |
+| `--weread-user` | `WEREAD_USER` | 浏览器 profile / 用户标识 |
 | `--weread-browser` | `WEREAD_BROWSER` | 浏览器类型 |
 | `--weread-duration` | `WEREAD_DURATION` | 阅读分钟数 |
-| `--weread-selection` | `WEREAD_SELECTION` | 书籍选择序号 |
+| `--weread-speed` | `WEREAD_SPEED` | 阅读速度：`slow` / `normal` / `fast` |
+| `--weread-screenshot` | `WEREAD_SCREENSHOT` | 阅读期间是否每分钟截图 |
 | `--weread-remote-browser` | `WEREAD_REMOTE_BROWSER` | 远程 Selenium 地址 |
-| `--enable-email` | `ENABLE_EMAIL` | 邮件通知开关 |
-| `--email-smtp` 等邮件参数 | `EMAIL_*` | SMTP 主机、账号、密码、发件人与收件人 |
 | `--bark-key` / `--bark-server` | `BARK_*` | Bark 推送配置 |
-| `--weread-data-dir` | `WEREAD_DATA_DIR` | 数据目录；未显式配置时按 `.weread` -> `data` -> 新建 `.weread` 的顺序解析 |
+| `--webhook-url` | `WEBHOOK_URL` | Webhook 通知地址 |
+| `--weread-data-dir` | `WEREAD_DATA_DIR` | cookies、登录二维码、日志和截图目录；未显式配置时使用 `./.weread` |
+| `--default-book-url` | `DEFAULT_BOOK_URL` | 指定后直接打开该阅读链接 |
+| `--weread-keywords` | `WEREAD_KEYWORDS` | 未配置 `DEFAULT_BOOK_URL` 时，从“我的书架”按关键词匹配书名 |
 
 `run` 同时接受 kebab-case 参数和原始环境变量名参数，例如 `--weread-browser firefox` 与 `--WEREAD_BROWSER firefox` 等价。

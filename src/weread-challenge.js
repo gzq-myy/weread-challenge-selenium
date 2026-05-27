@@ -5,7 +5,6 @@
  * All rights reserved.
  * Licensed under the MIT License.
  * For more information, contact: weread-challenge@techfetch.dev
- * 修改请保留统计代码
  */
 
 require("dotenv").config({ quiet: true });
@@ -39,7 +38,11 @@ function getWereadVersion() {
 
 const WEREAD_VERSION = getWereadVersion();
 const WEREAD_URL = "https://weread.qq.com/"; // Replace with the target URL
+const WEREAD_SHELF_URL = new URL("/web/shelf", WEREAD_URL).toString();
+const DEFAULT_WEREAD_DATA_DIR = ".weread";
 const QR_EXPIRED_TEXTS = ["点击刷新二维码", "二维码已失效"]; // 登录二维码过期提示
+const SHELF_MARKER_XPATH =
+  "//*[contains(text(), '我的书架') or contains(@href, '/web/shelf') or contains(@class, 'wr_index_mini_shelf_card')]";
 let lastPushedLoginLink = "";
 let logStream = null;
 let DEBUG = false; // Enable debug mode
@@ -47,31 +50,22 @@ let WEREAD_USER = "weread-default"; // User to use
 let WEREAD_REMOTE_BROWSER = "";
 let WEREAD_DURATION = 10; // Reading duration in minutes
 let WEREAD_SPEED = "slow"; // Reading speed, slow | normal | fast
-let WEREAD_SELECTION = 2; // Selection method
 let WEREAD_BROWSER = Browser.CHROME; // Browser to use, chrome | MicrosoftEdge | firefox
-let ENABLE_EMAIL = false; // Enable email notifications
 let WEREAD_SCREENSHOT = true; // Reading期间是否每分钟截图
-let WEREAD_AGREE_TERMS = true; // Agree to terms
-let EMAIL_PORT = 465; // SMTP port number, default 465
 let BARK_KEY = ""; // Bark推送密钥
 let BARK_SERVER = "https://api.day.app"; // Bark服务器地址
-let WEREAD_DATA_DIR = ".weread"; // 默认数据目录
+let WEBHOOK_URL = ""; // Webhook通知地址
+let WEREAD_DATA_DIR = DEFAULT_WEREAD_DATA_DIR; // 默认数据目录
 let WEREAD_KEYWORDS = ""; // 关键词选书，逗号分隔
-let DEFAULT_BOOK_URL =
-  "https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7"; // 默认阅读链接
+let DEFAULT_BOOK_URL = ""; // 配置后直接阅读该链接
 // env vars:
 // WEREAD_REMOTE_BROWSER
 // WEREAD_DURATION
 // WEREAD_BROWSER
-// ENABLE_EMAIL
 // WEREAD_SCREENSHOT
-// EMAIL_SMTP
-// EMAIL_USER
-// EMAIL_PASS
-// EMAIL_FROM
-// EMAIL_TO
 // BARK_KEY
 // BARK_SERVER
+// WEBHOOK_URL
 // WEREAD_DATA_DIR
 // WEREAD_KEYWORDS
 // DEFAULT_BOOK_URL
@@ -82,21 +76,14 @@ const RUN_OPTION_SPECS = [
   { envKey: "WEREAD_REMOTE_BROWSER", flag: "weread-remote-browser", type: "string", description: "Remote Selenium URL." },
   { envKey: "WEREAD_DURATION", flag: "weread-duration", type: "integer", description: "Reading duration in minutes." },
   { envKey: "WEREAD_SPEED", flag: "weread-speed", type: "string", description: "Reading speed: slow | normal | fast." },
-  { envKey: "WEREAD_SELECTION", flag: "weread-selection", type: "integer", description: "Book selection index." },
   { envKey: "WEREAD_BROWSER", flag: "weread-browser", type: "string", description: "Browser name: chrome | MicrosoftEdge | firefox | safari." },
-  { envKey: "ENABLE_EMAIL", flag: "enable-email", type: "boolean", description: "Enable email notifications." },
   { envKey: "WEREAD_SCREENSHOT", flag: "weread-screenshot", type: "boolean", description: "Capture screenshots while reading." },
-  { envKey: "WEREAD_AGREE_TERMS", flag: "weread-agree-terms", type: "boolean", description: "Enable usage telemetry upload." },
-  { envKey: "EMAIL_SMTP", flag: "email-smtp", type: "string", description: "SMTP server host." },
-  { envKey: "EMAIL_USER", flag: "email-user", type: "string", description: "SMTP username." },
-  { envKey: "EMAIL_PASS", flag: "email-pass", type: "string", description: "SMTP password." },
-  { envKey: "EMAIL_FROM", flag: "email-from", type: "string", description: "Email from address." },
-  { envKey: "EMAIL_TO", flag: "email-to", type: "string", description: "Email recipient." },
-  { envKey: "EMAIL_PORT", flag: "email-port", type: "integer", description: "SMTP port." },
   { envKey: "BARK_KEY", flag: "bark-key", type: "string", description: "Bark notification key." },
   { envKey: "BARK_SERVER", flag: "bark-server", type: "string", description: "Bark server base URL." },
+  { envKey: "WEBHOOK_URL", flag: "webhook-url", type: "string", description: "Webhook notification URL." },
   { envKey: "WEREAD_DATA_DIR", flag: "weread-data-dir", type: "string", description: "Data directory for cookies, logs and screenshots." },
-  { envKey: "DEFAULT_BOOK_URL", flag: "default-book-url", type: "string", description: "Fallback reading URL." },
+  { envKey: "WEREAD_KEYWORDS", flag: "weread-keywords", type: "string", description: "Comma-separated shelf book title keywords." },
+  { envKey: "DEFAULT_BOOK_URL", flag: "default-book-url", type: "string", description: "Reading URL. When set, the run opens it directly." },
 ];
 
 function parseBooleanValue(value, defaultValue = false, strict = false) {
@@ -241,11 +228,7 @@ async function detectShelfLoginState(driver) {
   } catch (_) {}
 
   try {
-    const markers = await driver.findElements(
-      By.xpath(
-        "//*[contains(text(), '我的书架') or contains(@href, '/web/shelf') or contains(@class, 'wr_index_mini_shelf_card')]"
-      )
-    );
+    const markers = await driver.findElements(By.xpath(SHELF_MARKER_XPATH));
     if (markers.length > 0) {
       return { loggedIn: true, reason: "shelf marker found" };
     }
@@ -254,20 +237,15 @@ async function detectShelfLoginState(driver) {
   return { loggedIn: false, reason: "" };
 }
 
-function resolveDefaultDataDir(cwd = process.cwd()) {
-  const preferredDir = ".weread";
-  const legacyDir = "data";
-  const preferredPath = path.resolve(cwd, preferredDir);
-  if (fs.existsSync(preferredPath)) {
-    return preferredDir;
-  }
+async function openShelfForKeywordSelection(driver) {
+  console.info("WEREAD_KEYWORDS 已配置，打开我的书架:", WEREAD_SHELF_URL);
+  await driver.get(WEREAD_SHELF_URL);
+  await driver.wait(until.elementLocated(By.xpath(SHELF_MARKER_XPATH)), 10000);
+  console.info("已打开我的书架。");
+}
 
-  const legacyPath = path.resolve(cwd, legacyDir);
-  if (fs.existsSync(legacyPath)) {
-    return legacyDir;
-  }
-
-  return preferredDir;
+function resolveDefaultDataDir() {
+  return DEFAULT_WEREAD_DATA_DIR;
 }
 
 function setRuntimeConfigFromEnv(env = process.env, options = {}) {
@@ -278,27 +256,16 @@ function setRuntimeConfigFromEnv(env = process.env, options = {}) {
     ? 10
     : parseDurationValue(env.WEREAD_DURATION, 10, options);
   WEREAD_SPEED = env.WEREAD_SPEED || "slow";
-  WEREAD_SELECTION = env.WEREAD_SELECTION === undefined
-    ? 2
-    : parseIntegerValue(env.WEREAD_SELECTION, "weread-selection");
   WEREAD_BROWSER = env.WEREAD_BROWSER || Browser.CHROME;
-  ENABLE_EMAIL = parseBooleanValue(env.ENABLE_EMAIL, false, false);
   WEREAD_SCREENSHOT = env.WEREAD_SCREENSHOT === undefined
     ? true
     : parseBooleanValue(env.WEREAD_SCREENSHOT, true, false);
-  WEREAD_AGREE_TERMS = env.WEREAD_AGREE_TERMS === undefined
-    ? true
-    : parseBooleanValue(env.WEREAD_AGREE_TERMS, true, false);
-  EMAIL_PORT = env.EMAIL_PORT === undefined
-    ? 465
-    : parseIntegerValue(env.EMAIL_PORT, "email-port");
   BARK_KEY = env.BARK_KEY || "";
   BARK_SERVER = env.BARK_SERVER || "https://api.day.app";
-  WEREAD_DATA_DIR = env.WEREAD_DATA_DIR || resolveDefaultDataDir();
+  WEBHOOK_URL = env.WEBHOOK_URL || "";
+  WEREAD_DATA_DIR = String(env.WEREAD_DATA_DIR || "").trim() || resolveDefaultDataDir();
   WEREAD_KEYWORDS = env.WEREAD_KEYWORDS || "";
-  DEFAULT_BOOK_URL =
-    env.DEFAULT_BOOK_URL ||
-    "https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7";
+  DEFAULT_BOOK_URL = String(env.DEFAULT_BOOK_URL || "").trim();
 }
 
 function getRunFlagValue(flags, spec) {
@@ -400,88 +367,6 @@ function escapeHtml(str = "") {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-function formatEmailSubject(subject) {
-  const versionLabel = `[v${WEREAD_VERSION}]`;
-  return String(subject).includes(versionLabel)
-    ? String(subject)
-    : `${subject} ${versionLabel}`;
-}
-
-function resolveEmailAttachments(filePaths = []) {
-  return filePaths
-    .filter(Boolean)
-    .filter((filePath) => {
-      if (fs.existsSync(filePath)) {
-        return true;
-      }
-      console.warn("邮件附件不存在，已跳过:", filePath);
-      return false;
-    });
-}
-
-function buildReportEmailHtml(text, attachments = [], options = {}) {
-  const safeText = escapeHtml(text);
-  const versionText = escapeHtml(WEREAD_VERSION);
-  const reportDate = escapeHtml(new Date().toLocaleDateString());
-  const extraHtml = options.extraHtml || "";
-  const imageGallery = attachments.length
-    ? `
-            <div class="image-gallery">
-                ${attachments
-                  .map(
-                    (att) => `
-                    <img src="cid:${att.cid}" alt="${escapeHtml(att.filename)}" style="display: block; margin: 10px auto; max-width: 100%;"/>
-                `
-                  )
-                  .join("")}
-            </div>
-      `
-    : "";
-
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        </style>
-    </head>
-    <body>
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="text-align: center; margin-bottom: 20px;">
-                <h2 style="color: #2c3e50;">WeRead Challenge Daily Report</h2>
-                <p style="color: #7f8c8d; margin-bottom: 4px;">${reportDate}</p>
-                <p style="color: #7f8c8d; margin-top: 0;">Version ${versionText}</p>
-            </div>
-
-            <div style="background: #f9f9f9; border-left: 4px solid #2980b9; padding: 15px; margin: 20px 0;">
-                <p>Dear User,</p>
-                <p>${safeText}</p>
-                <p>Here are your reading statistics and achievements for today.</p>
-            </div>
-
-            ${extraHtml}
-
-            ${imageGallery}
-
-            <div style="margin: 20px 0;">
-                <p>Best regards,</p>
-                <p style="color: #2980b9;">WeRead Challenge Team</p>
-            </div>
-
-            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-
-            <div style="font-size: 12px; color: #7f8c8d; text-align: center;">
-                <p>This is an automated message, please do not reply.</p>
-                <p>Version ${versionText}</p>
-            </div>
-        </div>
-    </body>
-    </html>
-`;
 }
 
 // Utility function to redirect logging
@@ -640,122 +525,6 @@ async function collectDiagnostics(reason) {
   }
 }
 
-function getOSInfo() {
-  const platform = os.platform();
-  const release = os.release();
-
-  switch (platform) {
-    case "win32":
-      return `Windows ${release}`;
-    case "darwin":
-      return `MacOS ${release}`;
-    case "linux":
-      return `Linux ${release}`;
-    default:
-      return `${platform} ${release}`;
-  }
-}
-// post data to weread log
-function logEventToWereadLog(err) {
-  const url = DEBUG
-    ? "http://127.0.0.1:8787/logs"
-    : "https://weread-challenge.techfetch.dev/logs";
-  const httpModule = DEBUG ? http : https;
-
-  let userInfo = getUserInfo();
-  let params = {
-    os: getOSInfo(),
-    browser: WEREAD_BROWSER,
-    duration: parseInt(WEREAD_DURATION) || 0,
-    enable_email: ENABLE_EMAIL,
-    error: err,
-    version: WEREAD_VERSION,
-  };
-
-  let data = { ...params, ...userInfo };
-
-  const options = {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "WeRead-Tracker/1.0",
-    },
-  };
-
-  // log stringified data
-  console.info("Logging to WeRead server:", JSON.stringify(data));
-
-  const req = httpModule.request(url, options, (res) => {
-    let responseData = "";
-
-    res.on("data", (chunk) => {
-      responseData += chunk;
-    });
-
-    res.on("end", () => {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        console.info("Successfully logged to WeRead server");
-      } else {
-        console.error(
-          `Failed to log to WeRead server: ${res.statusCode} - ${responseData}`
-        );
-      }
-    });
-  });
-
-  req.on("error", (error) => {
-    console.error("Error logging to WeRead server:", error.message);
-  });
-
-  req.write(JSON.stringify(data));
-  req.end();
-}
-
-function getUserInfo() {
-  // return empty object if cookies file not found
-  if (!fs.existsSync(getCookieFilePath())) {
-    return {};
-  }
-  // read from cookies
-  let cookiesFile = fs.readFileSync(getCookieFilePath(), "utf8");
-  let cookies = JSON.parse(cookiesFile);
-  let userInfo = {};
-  for (const cookie of cookies) {
-    if (cookie.secure == undefined) {
-      continue;
-    }
-    switch (cookie.name) {
-      case "wr_gid":
-        if (cookie.secure == true) {
-          userInfo.wr_gid_s = parseInt(cookie.value) || 0;
-        } else {
-          userInfo.wr_gid = parseInt(cookie.value) || 0;
-        }
-        break;
-      case "wr_name":
-        userInfo.wr_name = decodeURIComponent(cookie.value);
-        break;
-      case "wr_localvid":
-        userInfo.wr_localvid = cookie.value;
-        break;
-      case "wr_gender":
-        userInfo.wr_gender = parseInt(cookie.value) || 0;
-        break;
-      case "wr_avatar":
-        userInfo.wr_avatar = decodeURIComponent(cookie.value);
-        break;
-      case "wr_rt":
-        userInfo.wr_rt = cookie.value;
-        break;
-      case "wr_vid":
-        userInfo.wr_vid = parseInt(cookie.value) || 0;
-        break;
-    }
-  }
-
-  return userInfo;
-}
-
 async function saveCookies(driver, filePath) {
   let cookies = await driver.manage().getCookies();
   // If using Safari, set secure to true for all cookies
@@ -883,55 +652,6 @@ async function extractAndDisplayQRCode(driver) {
   }
 }
 
-function canSendLoginLinkEmail() {
-  if (!ENABLE_EMAIL) {
-    return false;
-  }
-  const required = ["EMAIL_SMTP", "EMAIL_USER", "EMAIL_PASS", "EMAIL_TO"];
-  const missed = required.filter((key) => !process.env[key]);
-  if (missed.length) {
-    console.warn("邮件推送登录链接失败：缺少配置", missed.join(", "));
-    return false;
-  }
-  return true;
-}
-
-function buildLoginLinkEmailHtml(loginUrl) {
-  const safeUrl = escapeHtml(loginUrl);
-  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=360x360&data=${encodeURIComponent(loginUrl)}`;
-  const safeQrImageUrl = escapeHtml(qrImageUrl);
-  const versionText = escapeHtml(WEREAD_VERSION);
-  return `
-  <!DOCTYPE html>
-  <html>
-  <head>
-      <meta charset="utf-8">
-      <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .card { max-width: 680px; margin: 0 auto; padding: 20px; }
-          .qr-box { background: #f9f9f9; border-left: 4px solid #2d8cf0; padding: 16px; text-align: center; }
-          .qr-img { width: 280px; height: 280px; display: block; margin: 8px auto 12px auto; }
-          .open-link { display: inline-block; background: #2d8cf0; color: #fff !important; text-decoration: none; padding: 8px 14px; border-radius: 6px; }
-      </style>
-  </head>
-  <body>
-      <div class="card">
-          <h2 style="color: #2c3e50;">微信读书登录二维码</h2>
-          <p style="color: #7f8c8d;">Version ${versionText}</p>
-          <p>检测到新的扫码登录链接，请尽快在手机端完成登录。</p>
-          <div class="qr-box">
-            <img class="qr-img" src="${safeQrImageUrl}" alt="微信读书登录二维码" />
-            <a class="open-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">点击打开登录链接</a>
-          </div>
-          <p style="font-size: 12px; color: #7f8c8d; margin-top: 16px;">
-            该链接由 weread-challenge 自动发送。Version ${versionText}
-          </p>
-      </div>
-  </body>
-  </html>
-`;
-}
-
 async function notifyLoginLink(loginUrl) {
   if (!loginUrl) {
     return;
@@ -943,38 +663,21 @@ async function notifyLoginLink(loginUrl) {
   }
 
   lastPushedLoginLink = loginUrl;
-  const tasks = [];
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(loginUrl)}`;
 
-  if (BARK_KEY) {
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(loginUrl)}`;
-    tasks.push(
-      sendBark("微信读书挑战", "请扫码登录微信读书", {
-        subtitle: "扫码登录",
-        url: loginUrl,
-        image: qrImageUrl,
-        level: "active",
-        sound: "birdsong",
-      })
-    );
-  }
-
-  if (canSendLoginLinkEmail()) {
-    tasks.push(
-      sendMail(
-        "[项目进展--登录链接]",
-        "检测到新的微信读书登录二维码，请在邮件中扫码登录。",
-        [],
-        { html: buildLoginLinkEmailHtml(loginUrl) }
-      )
-    );
-  }
-
-  if (!tasks.length) {
-    console.info("未启用登录链接推送（需要 BARK_KEY 或 ENABLE_EMAIL=true）");
-    return;
-  }
-
-  await Promise.allSettled(tasks);
+  await sendNotification("微信读书挑战", "请扫码登录微信读书", {
+    event: "login_link",
+    subtitle: "扫码登录",
+    url: loginUrl,
+    image: qrImageUrl,
+    level: "active",
+    sound: "birdsong",
+    data: {
+      loginUrl,
+      qrImageUrl,
+      imageSource: "qrserver",
+    },
+  });
 }
 
 // 安全点击元素函数，处理元素被拦截的情况
@@ -1103,61 +806,6 @@ async function refreshQRCode(driver) {
   }
 }
 
-async function sendMail(subject, text, filePaths = [], options = {}) {
-  const nodemailer = require("nodemailer");
-
-  // 根据端口自动判断是否使用SSL
-  // 通常 465 使用 SSL，587 和 25 不使用
-  const secure = EMAIL_PORT === 465;
-
-  // Create transporter object using SMTP transport
-  let transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_SMTP,
-    port: EMAIL_PORT,
-    secure: secure, // true for 465, false for other ports
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
-
-  const existingFilePaths = resolveEmailAttachments(filePaths);
-
-  // Convert image paths to attachments array
-  const attachments = existingFilePaths.map((filePath) => ({
-    filename: path.basename(filePath),
-    path: filePath,
-    cid: path.basename(filePath), // Content ID for embedding in HTML
-    contentType: `image/${path.extname(filePath).substring(1)}`, // Automatically detect image type
-  }));
-
-  // Use EMAIL_FROM if provided, otherwise fall back to EMAIL_USER
-  const fromAddress = process.env.EMAIL_FROM || process.env.EMAIL_USER;
-
-  const defaultHtml = buildReportEmailHtml(text, attachments, options);
-
-  // Email options with updated from field
-  let mailOptions = {
-    from: fromAddress,
-    to: process.env.EMAIL_TO,
-    subject: formatEmailSubject(subject),
-    text: text,
-    attachments: attachments,
-    html: options.html || defaultHtml,
-  };
-
-  try {
-    // Send mail with defined transport object
-    let info = await transporter.sendMail(mailOptions);
-    console.info("Email sent successfully");
-    console.info("Message ID: ", info.messageId);
-    return true;
-  } catch (error) {
-    console.error("Error sending email: ", error);
-    return false;
-  }
-}
-
 async function sendBark(title, body, options = {}) {
   if (!BARK_KEY) {
     console.info("Bark推送密钥未配置");
@@ -1182,7 +830,7 @@ async function sendBark(title, body, options = {}) {
   if (image) payload.image = image;
 
   const jsonData = JSON.stringify(payload);
-  console.info("发送Bark推送:", barkUrl);
+  console.info("发送Bark推送:", maskUrlForLog(barkUrl));
 
   try {
     const httpModule = barkUrl.startsWith("https://") ? https : http;
@@ -1197,7 +845,7 @@ async function sendBark(title, body, options = {}) {
         headers: {
           "Content-Type": "application/json; charset=utf-8",
           "Content-Length": Buffer.byteLength(jsonData),
-          "User-Agent": "WeRead-Tracker/1.0",
+          "User-Agent": `weread-selenium-cli/${WEREAD_VERSION}`,
         },
       }, (res) => {
         let responseData = "";
@@ -1225,6 +873,119 @@ async function sendBark(title, body, options = {}) {
     console.error("Bark推送异常:", error);
     return false;
   }
+}
+
+async function sendWebhook(title, body, options = {}) {
+  if (!WEBHOOK_URL) {
+    console.info("Webhook URL未配置");
+    return false;
+  }
+
+  const payload = {
+    event: options.event || "notification",
+    title,
+    body,
+    subtitle: options.subtitle || "",
+    level: options.level || "active",
+    sound: options.sound || "",
+    url: options.url || "",
+    image: options.image || "",
+    version: WEREAD_VERSION,
+    timestamp: new Date().toISOString(),
+    runtime: {
+      user: WEREAD_USER,
+      browser: WEREAD_BROWSER,
+      durationMinutes: WEREAD_DURATION,
+      speed: WEREAD_SPEED,
+    },
+    data: options.data || {},
+  };
+  const jsonData = JSON.stringify(payload);
+
+  try {
+    const urlObj = new URL(WEBHOOK_URL);
+    if (urlObj.protocol !== "http:" && urlObj.protocol !== "https:") {
+      console.error("Webhook URL协议仅支持 http 或 https");
+      return false;
+    }
+
+    const httpModule = urlObj.protocol === "https:" ? https : http;
+    const pathWithQuery = `${urlObj.pathname || "/"}${urlObj.search || ""}`;
+    console.info("发送Webhook通知:", maskUrlForLog(WEBHOOK_URL));
+
+    return new Promise((resolve) => {
+      const req = httpModule.request({
+        hostname: urlObj.hostname,
+        port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
+        path: pathWithQuery,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Length": Buffer.byteLength(jsonData),
+          "User-Agent": `weread-selenium-cli/${WEREAD_VERSION}`,
+        },
+      }, (res) => {
+        let responseData = "";
+        res.on("data", (chunk) => { responseData += chunk; });
+        res.on("end", () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            console.info("Webhook通知发送成功");
+            resolve(true);
+          } else {
+            console.error(`Webhook通知失败: ${res.statusCode} - ${responseData}`);
+            resolve(false);
+          }
+        });
+      });
+
+      req.on("error", (error) => {
+        console.error("Webhook通知请求错误:", error.message);
+        resolve(false);
+      });
+
+      req.write(jsonData);
+      req.end();
+    });
+  } catch (error) {
+    console.error("Webhook通知异常:", error.message || error);
+    return false;
+  }
+}
+
+function maskUrlForLog(rawUrl) {
+  try {
+    const urlObj = new URL(rawUrl);
+    const pathParts = urlObj.pathname.split("/");
+    const maskedPath = pathParts
+      .map((part, index) => {
+        if (!part || index < pathParts.length - 1) {
+          return part;
+        }
+        return "***";
+      })
+      .join("/");
+    return `${urlObj.protocol}//${urlObj.host}${maskedPath}${urlObj.search ? "?***" : ""}`;
+  } catch (_) {
+    return "(invalid url)";
+  }
+}
+
+async function sendNotification(title, body, options = {}) {
+  const tasks = [];
+
+  if (BARK_KEY) {
+    tasks.push(sendBark(title, body, options));
+  }
+  if (WEBHOOK_URL) {
+    tasks.push(sendWebhook(title, body, options));
+  }
+
+  if (!tasks.length) {
+    console.info("未启用通知推送（需要 BARK_KEY 或 WEBHOOK_URL）");
+    return [];
+  }
+
+  return Promise.allSettled(tasks);
 }
 
 function quoteShellArg(value) {
@@ -1327,7 +1088,7 @@ Notes:
   - On Windows, if the generated create command returns 'Access is denied', rerun it in an Administrator terminal.
   - If --workdir is omitted, schedule uses the current user's home directory.
   - schedule only supports appending --weread-duration to the generated run command.
-  - Local CLI runs prefer .weread, but reuse an existing ./data directory when WEREAD_DATA_DIR is not set.
+  - Local CLI runs use ./.weread when WEREAD_DATA_DIR is not set.
 `.trim(),
     run: `
 Usage:
@@ -1342,7 +1103,7 @@ Notes:
   - Existing environment variables remain the configuration source.
   - CLI run options override environment variables.
   - Legacy alias 'weread-challenge' remains supported.
-  - Local CLI runs prefer .weread, but reuse an existing ./data directory when WEREAD_DATA_DIR is not set.
+  - Local CLI runs use ./.weread when WEREAD_DATA_DIR is not set.
   - Invoking the CLI with no arguments still behaves like run and prints a migration hint.
 `.trim(),
   };
@@ -1458,7 +1219,7 @@ function getWindowsSchedulePlan(config) {
       `Start Time: ${startTime}`,
       `Working Directory: ${config.workdir}`,
       `Command: ${config.command}`,
-      `Data Directory: ${path.join(config.workdir, ".weread")} (or existing ${path.join(config.workdir, "data")} in compatibility mode)`,
+      `Data Directory: ${path.join(config.workdir, DEFAULT_WEREAD_DATA_DIR)}`,
       `Trigger: daily at ${startTime}, then every ${config.every} minute(s) for ${repetitionDuration}`,
     ],
   };
@@ -1599,7 +1360,7 @@ function getScheduleNotes(plan) {
   const notes = [
     "schedule only prints commands. It does not create the scheduled task for you.",
     "Generated commands use weread-selenium-cli run. Existing weread-challenge tasks remain valid through the legacy bin alias.",
-    "If WEREAD_DATA_DIR is not set, runtime prefers .weread and reuses an existing ./data directory for compatibility.",
+    "If WEREAD_DATA_DIR is not set, runtime uses ./.weread under the working directory.",
   ];
 
   if (plan.platform === "windows") {
@@ -1721,7 +1482,8 @@ async function runMain() {
   let driver;
 
   // 发送脚本启动通知
-  await sendBark("微信读书挑战", "自动阅读脚本开始运行", {
+  await sendNotification("微信读书挑战", "自动阅读脚本开始运行", {
+    event: "script_started",
     subtitle: "脚本启动",
     level: "active",
     sound: "beginning"
@@ -1871,9 +1633,7 @@ async function runMain() {
     let locator1 = By.xpath(
       "//div[contains(text(), '点击刷新二维码') and @class='wr_login_modal_qr_overlay_text']"
     );
-    let locator2 = By.xpath(
-      "//*[contains(text(), '我的书架') or contains(@href, '/web/shelf') or contains(@class, 'wr_index_mini_shelf_card')]"
-    );
+    let locator2 = By.xpath(SHELF_MARKER_XPATH);
 
     let maxRetries = 3;
     while (maxRetries-- > 0) {
@@ -1943,26 +1703,8 @@ async function runMain() {
 
     if (maxRetries <= 0) {
       console.error("Failed to login.");
-      if (ENABLE_EMAIL) {
-        const loginFailureAttachments = fs.existsSync(getLoginQrCodePath())
-          ? [getLoginQrCodePath()]
-          : [];
-        await sendMail(
-          "[项目进展--项目停滞]",
-          "Failed to login.",
-          loginFailureAttachments,
-          {
-            extraHtml: loginFailureAttachments.length
-              ? `
-            <div style="background: #fff7e6; border-left: 4px solid #fa8c16; padding: 15px; margin: 20px 0;">
-                <p style="margin: 0;">The current login QR code is attached below. Scan it to complete login.</p>
-            </div>
-          `
-              : "",
-          }
-        );
-      }
-      await sendBark("微信读书挑战", "登录失败", {
+      await sendNotification("微信读书挑战", "登录失败", {
+        event: "login_failed",
         subtitle: "项目停滞",
         level: "critical",
         sound: "alarm"
@@ -1975,74 +1717,61 @@ async function runMain() {
     // If cookies exist, save them
     await saveCookies(driver, getCookieFilePath());
 
-    if (WEREAD_AGREE_TERMS) {
-      logEventToWereadLog("");
-    }
+    const keywords = parseKeywordList(WEREAD_KEYWORDS);
 
-    // Find the first div with class "wr_index_mini_shelf_card"
-    let selection = Number(WEREAD_SELECTION);
-    if (selection === -1) {
-      console.info("WEREAD_SELECTION=-1，直接打开 DEFAULT_BOOK_URL:", DEFAULT_BOOK_URL);
+    if (DEFAULT_BOOK_URL) {
+      console.info("DEFAULT_BOOK_URL 已配置，直接打开:", DEFAULT_BOOK_URL);
       await driver.get(DEFAULT_BOOK_URL);
     } else {
+      if (keywords.length === 0) {
+        const errorMessage = "DEFAULT_BOOK_URL 未配置，且 WEREAD_KEYWORDS 没有有效关键词，无法选书。";
+        console.error(errorMessage);
+        await sendNotification("微信读书挑战", errorMessage, {
+          event: "book_not_found",
+          subtitle: "项目停滞",
+          level: "critical",
+          sound: "alarm"
+        });
+        return;
+      }
+
+      await openShelfForKeywordSelection(driver);
       const books = await driver.findElements(
         By.xpath("//div[@class='wr_index_mini_shelf_card']"),
         10000
       );
-      const keywords = parseKeywordList(WEREAD_KEYWORDS);
-
-      if (WEREAD_KEYWORDS && keywords.length === 0) {
-        console.warn("WEREAD_KEYWORDS 已设置，但清洗后没有有效关键词，将回退到常规选书逻辑。");
-      }
-
-      if (keywords.length > 0) {
-        const matchedBooks = [];
-        console.info(`Using keywords to find a book: [${keywords.join(", ")}]`);
-        for (const book of books) {
-          try {
-            const title = await resolveBookCardTitle(driver, book);
-            if (!title) {
-              console.debug("Could not resolve book title for keyword matching: empty title");
-              continue;
-            }
-            if (keywords.some((keyword) => title.includes(keyword))) {
-              matchedBooks.push({ element: book, title });
-            }
-          } catch (error) {
-            console.debug("Could not resolve book title for keyword matching:", error.message);
+      const matchedBooks = [];
+      console.info(`Using keywords to find a book: [${keywords.join(", ")}]`);
+      for (const book of books) {
+        try {
+          const title = await resolveBookCardTitle(driver, book);
+          if (!title) {
+            console.debug("Could not resolve book title for keyword matching: empty title");
+            continue;
           }
-        }
-
-        if (matchedBooks.length === 0) {
-          const errorMessage = `No books found on the shelf matching keywords: [${WEREAD_KEYWORDS}].`;
-          console.error(errorMessage);
-          await sendBark("微信读书挑战", errorMessage, {
-            subtitle: "项目停滞",
-            level: "critical",
-            sound: "alarm"
-          });
-          return;
-        }
-
-        const matchedBook = matchedBooks[Math.floor(Math.random() * matchedBooks.length)];
-        await matchedBook.element.click();
-        console.info(`Randomly selected to read: "${matchedBook.title}"`);
-      } else {
-      if (selection === 0) {
-        // random selection between 1 and 4
-        selection = Math.floor(Math.random() * 4) + 1;
-      }
-        if (books.length > 0 && books.length < selection) {
-          await books[0].click();
-          console.info("Clicked on the first book.");
-        } else if (books.length >= selection) {
-          await books[selection - 1].click();
-          console.info("Clicked on the ", selection, "th book.");
-        } else {
-          console.warn("No book link found. Using the default link.");
-          await driver.get(DEFAULT_BOOK_URL);
+          if (keywords.some((keyword) => title.includes(keyword))) {
+            matchedBooks.push({ element: book, title });
+          }
+        } catch (error) {
+          console.debug("Could not resolve book title for keyword matching:", error.message);
         }
       }
+
+      if (matchedBooks.length === 0) {
+        const errorMessage = `No books found on the shelf matching keywords: [${WEREAD_KEYWORDS}].`;
+        console.error(errorMessage);
+        await sendNotification("微信读书挑战", errorMessage, {
+          event: "book_not_found",
+          subtitle: "项目停滞",
+          level: "critical",
+          sound: "alarm"
+        });
+        return;
+      }
+
+      const matchedBook = matchedBooks[Math.floor(Math.random() * matchedBooks.length)];
+      await matchedBook.element.click();
+      console.info(`Randomly selected to read: "${matchedBook.title}"`);
     }
 
     // get button with title equal to "目录"
@@ -2073,17 +1802,8 @@ async function runMain() {
     );
     console.info("Successfully switched to vertical scroll mode.");
 
-    if (ENABLE_EMAIL) {
-      await driver
-        .takeScreenshot()
-        .then((image, err) =>
-          fs.writeFileSync(getScreenshotPath(), image, "base64")
-        );
-      await sendMail("[项目进展--项目启动]", "Login successful.", [
-        getScreenshotPath(),
-      ]);
-    }
-    await sendBark("微信读书挑战", "登录成功", {
+    await sendNotification("微信读书挑战", "登录成功", {
+      event: "login_success",
       subtitle: "项目启动",
       level: "active",
       sound: "birdsong"
@@ -2243,20 +1963,12 @@ async function runMain() {
 
     // save cookies after reading
     await saveCookies(driver, getCookieFilePath());
-    if (ENABLE_EMAIL) {
-      await driver
-        .takeScreenshot()
-        .then((image, err) =>
-          fs.writeFileSync(getScreenshotPath(), image, "base64")
-        );
-      await sendMail("[项目进展--项目完成]", "Reading completed.", [
-        getScreenshotPath(),
-      ]);
-    }
-    await sendBark("微信读书挑战", `阅读完成，持续时间：${WEREAD_DURATION}分钟`, {
+    await sendNotification("微信读书挑战", `阅读完成，持续时间：${WEREAD_DURATION}分钟`, {
+      event: "reading_completed",
       subtitle: "项目完成",
       level: "active",
-      sound: "success"
+      sound: "success",
+      data: { durationMinutes: WEREAD_DURATION },
     });
   } catch (e) {
     // Add line number to error message if possible
@@ -2270,18 +1982,13 @@ async function runMain() {
     console.info(errorMessage);
     // 出错时抓取 selenium 健康状态与容器日志
     await collectDiagnostics(errorMessage);
-    if (ENABLE_EMAIL) {
-      await sendMail("[项目进展--项目停滞]", "Error occurred: " + errorMessage);
-    }
-    await sendBark("微信读书挑战", `发生错误：${errorMessage.substring(0, 100)}${errorMessage.length > 100 ? '...' : ''}`, {
+    await sendNotification("微信读书挑战", `发生错误：${errorMessage.substring(0, 100)}${errorMessage.length > 100 ? '...' : ''}`, {
+      event: "error",
       subtitle: "项目停滞",
       level: "critical",
-      sound: "alarm"
+      sound: "alarm",
+      data: { error: errorMessage },
     });
-
-    if (WEREAD_AGREE_TERMS) {
-      logEventToWereadLog(errorMessage);
-    }
 
     // wait for 3 seconds before closing the browser
     await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -2303,22 +2010,14 @@ function getRuntimeConfigSnapshot() {
     WEREAD_REMOTE_BROWSER,
     WEREAD_DURATION,
     WEREAD_SPEED,
-    WEREAD_SELECTION,
     WEREAD_BROWSER,
-    ENABLE_EMAIL,
     WEREAD_SCREENSHOT,
-    WEREAD_AGREE_TERMS,
-    EMAIL_PORT,
     BARK_KEY,
     BARK_SERVER,
+    WEBHOOK_URL,
     WEREAD_DATA_DIR,
     WEREAD_KEYWORDS,
     DEFAULT_BOOK_URL,
-    EMAIL_SMTP: process.env.EMAIL_SMTP || "",
-    EMAIL_USER: process.env.EMAIL_USER || "",
-    EMAIL_PASS: process.env.EMAIL_PASS || "",
-    EMAIL_FROM: process.env.EMAIL_FROM || "",
-    EMAIL_TO: process.env.EMAIL_TO || "",
   };
 }
 

@@ -41,13 +41,12 @@ function parseKeywords(rawKeywords) {
 
 function createRuntimeConfig(env = process.env, options = {}) {
   const duration = parseDurationConfig(env.WEREAD_DURATION || String(DEFAULT_READING_DURATION_MINUTES), options);
-  const emailPort = Number.parseInt(env.EMAIL_PORT, 10);
 
   return {
-    DATA_DIR: './data',
+    DATA_DIR: './.weread',
     WEREAD_VERSION: '0.13.0',
-    COOKIE_FILE: './data/cookies.json',
-    LOGIN_QR_CODE: './data/login.png',
+    COOKIE_FILE: './.weread/cookies.json',
+    LOGIN_QR_CODE: './.weread/login.png',
     URL: 'https://weread.qq.com/',
     DEBUG: env.DEBUG === 'true',
     WEREAD_USER: env.WEREAD_USER || 'weread-default',
@@ -55,13 +54,12 @@ function createRuntimeConfig(env = process.env, options = {}) {
     WEREAD_DURATION: duration,
     WEREAD_SPEED: env.WEREAD_SPEED || 'slow',
     WEREAD_BROWSER: env.WEREAD_BROWSER || 'chrome',
-    ENABLE_EMAIL: env.ENABLE_EMAIL === 'true',
-    WEREAD_AGREE_TERMS: env.WEREAD_AGREE_TERMS !== 'false',
-    EMAIL_PORT: Number.isInteger(emailPort) ? emailPort : 465,
     BARK_KEY: env.BARK_KEY || '',
     BARK_SERVER: env.BARK_SERVER || 'https://api.day.app',
+    WEBHOOK_URL: env.WEBHOOK_URL || '',
     WEREAD_KEYWORDS: env.WEREAD_KEYWORDS || '',
     WEREAD_KEYWORDS_LIST: parseKeywords(env.WEREAD_KEYWORDS || ''),
+    DEFAULT_BOOK_URL: String(env.DEFAULT_BOOK_URL || '').trim(),
     QR_EXPIRED_TEXTS: ['点击刷新二维码', '二维码已失效'],
   };
 }

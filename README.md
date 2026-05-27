@@ -46,10 +46,8 @@ docker compose up -d
 - 支持登录二维码刷新
 - 支持保存 cookies
 - 支持加载 cookies
-- 支持选择最近阅读的第 X 本书开始阅读
-- 默认选择书架第 2 本书开始阅读
-- 支持随机选择书籍开始阅读
-- 支持自定义默认兜底阅读链接
+- 支持配置固定阅读链接直接开始阅读
+- 支持从“我的书架”按关键词匹配书籍开始阅读
 - 支持自动阅读
 - 支持跳到下一章
 - 支持读完跳回第一章继续阅读
@@ -60,15 +58,14 @@ docker compose up -d
 - 支持日志
 - 支持定时任务
 - 支持设置阅读时间
-- 支持邮件通知
 - 支持 Bark 推送通知
+- 支持 Webhook 通知
 - 多平台支持: `linux | windows | macos`
 - 支持架构: `amd64`
 <!-- - 多架构支持: `amd64 | arm64` -->
 - 支持浏览器: `chrome | MicrosoftEdge | firefox | safari`
 - 支持多用户
 - 异常时强制刷新
-- 使用统计
 
 ## CLI 子命令
 
@@ -82,11 +79,11 @@ docker compose up -d
 # 查看总帮助
 npx weread-selenium-cli -h
 
-# 运行主流程
-npx weread-selenium-cli run
+# 运行主流程：指定固定阅读链接
+npx weread-selenium-cli run --default-book-url https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7
 
-# run 参数会覆盖同名环境变量
-npx weread-selenium-cli run --weread-browser firefox --weread-duration 30
+# run 参数会覆盖同名环境变量；未指定 DEFAULT_BOOK_URL 时按关键词从书架选书
+npx weread-selenium-cli run --weread-browser firefox --weread-duration 30 --weread-keywords 三体,明朝
 
 # 生成 Windows 计划任务创建命令
 npx weread-selenium-cli schedule --name weread-hourly --every 60 --platform windows
@@ -103,7 +100,7 @@ Windows 默认会生成一条 `schtasks` 创建命令：先按当天某个时间
 如果 Windows 创建命令执行时报 `Access is denied`，请改在“以管理员身份运行”的终端里执行生成出来的创建命令。
 `run` 支持把现有环境变量改写成参数形式，优先级为：CLI 参数 > 环境变量 > 默认值。参数既支持 `--weread-browser` 这种 kebab-case，也支持 `--WEREAD_BROWSER` 这种原始环境变量名。
 `weread-selenium-cli` 是主命令，旧全局命令 `weread-challenge` 继续保留，等价于执行 `weread-selenium-cli run`。
-本地运行在未设置 `WEREAD_DATA_DIR` 时，会优先使用当前工作目录下已存在的 `.weread`，其次复用旧版 `data/`，否则新建 `.weread`。
+本地运行在未设置 `WEREAD_DATA_DIR` 时，默认使用当前工作目录下的 `./.weread`。
 
 ## Linux
 
@@ -123,13 +120,14 @@ npm install -g weread-selenium-cli
 
 # 设置环境变量并运行
 export WEREAD_BROWSER="chrome"
+export WEREAD_KEYWORDS="三体,明朝"
 weread-selenium-cli run
 ```
 
 也可不全局安装，直接使用 npx 运行：
 
 ```bash
-npx weread-selenium-cli run
+npx weread-selenium-cli run --weread-keywords 三体,明朝
 ```
 
 已存在的旧全局命令 `weread-challenge` 仍可直接运行。
@@ -161,6 +159,7 @@ services:
     environment:
       - WEREAD_REMOTE_BROWSER=http://selenium:4444
       - WEREAD_DURATION=68
+      - DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7
     volumes:
       - ./.weread:/app/.weread
     depends_on:
@@ -195,7 +194,7 @@ docker compose up -d
 ```
 
 首次启动后，需要微信扫描二维码登录，二维码保存在 `./.weread/login.png`
-如果你仍在沿用旧版 `./data:/app/data` 挂载，且没有显式设置 `WEREAD_DATA_DIR`，当前版本会继续复用 `/app/data`；新部署示例统一使用 `./.weread:/app/.weread`。
+如果你仍在沿用旧版 `./data:/app/data` 挂载，请显式设置 `WEREAD_DATA_DIR=/app/data`；新部署示例统一使用 `./.weread:/app/.weread`。
 
 ### Docker 运行
 
@@ -226,6 +225,7 @@ docker run --rm --name user-read \
   -v $HOME/weread-challenge/user/.weread:/app/.weread \
   -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 \
   -e WEREAD_DURATION=68 \
+  -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 \
   docker.io/jqknono/weread-challenge:latest
 
 # 添加第二个用户
@@ -233,6 +233,7 @@ docker run --rm --name user2-read \
   -v $HOME/weread-challenge/user2/.weread:/app/.weread \
   -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 \
   -e WEREAD_DURATION=68 \
+  -e WEREAD_KEYWORDS=三体,明朝 \
   docker.io/jqknono/weread-challenge:latest
 ```
 
@@ -259,6 +260,7 @@ services:
     environment:
       - WEREAD_REMOTE_BROWSER=http://selenium:4444
       - WEREAD_DURATION=68
+      - DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7
     volumes:
       - ./.weread:/app/.weread
     depends_on:
@@ -314,17 +316,17 @@ WEREAD_USER="user"
 mkdir -p $HOME/weread-challenge/$WEREAD_USER/.weread
 # 首次启动后, 需微信扫描二维码登录, 二维码保存在 $HOME/weread-challenge/$WEREAD_USER/.weread/login.png
 # 每隔6个小时, 阅读68分钟
-(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER}-read -v $HOME/weread-challenge/${WEREAD_USER}/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER} docker.io/jqknono/weread-challenge:latest") | crontab -
+(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER}-read -v $HOME/weread-challenge/${WEREAD_USER}/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER} -e WEREAD_KEYWORDS=三体,明朝 docker.io/jqknono/weread-challenge:latest") | crontab -
 ```
 
 crontab 示例：
 
 ```bash
-00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_SELECTION=2 -e ENABLE_EMAIL=true -e EMAIL_SMTP=smtp.mail.me.com -e EMAIL_USER=user1@icloud.com -e EMAIL_PASS=aaaa-bbbb-cccc-dddd -e EMAIL_PORT=587 -e EMAIL_TO=weread-challege@outlook.com docker.io/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_KEYWORDS=三体 -e WEBHOOK_URL=https://example.com/weread-webhook docker.io/jqknono/weread-challenge:latest
 
-00 01 * * * docker run --rm --name user2-read -v /home/test/weread-challenge/user2/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user2 -e WEREAD_SELECTION=2 -e ENABLE_EMAIL=true -e EMAIL_SMTP=smtp.mail.me.com -e EMAIL_USER=user2@icloud.com -e EMAIL_PASS=aaaa-bbbb-cccc-dddd -e EMAIL_PORT=587 -e EMAIL_TO=weread-challege@outlook.com docker.io/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user2-read -v /home/test/weread-challenge/user2/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user2 -e WEREAD_KEYWORDS=历史,科幻 -e WEBHOOK_URL=https://example.com/weread-webhook docker.io/jqknono/weread-challenge:latest
 
-00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_SELECTION=2 -e BARK_KEY=your-bark-key-here docker.io/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 -e BARK_KEY=your-bark-key-here docker.io/jqknono/weread-challenge:latest
 ```
 
 ## Windows
@@ -342,6 +344,7 @@ npm install -g weread-selenium-cli
 
 # 设置环境变量并运行
 $env:WEREAD_BROWSER="MicrosoftEdge"
+$env:WEREAD_KEYWORDS="三体,明朝"
 weread-selenium-cli run
 ```
 
@@ -365,6 +368,7 @@ sudo safaridriver --enable
 
 # 设置环境变量并运行
 export WEREAD_BROWSER="safari"
+export WEREAD_KEYWORDS="三体,明朝"
 weread-selenium-cli run
 ```
 
@@ -389,7 +393,7 @@ Bark 是一个 iOS 设备上的推送服务，可以通过简单的 HTTP 请求�
 
 ```bash
 export BARK_KEY="your-bark-key-here"
-npx weread-selenium-cli run
+npx weread-selenium-cli run --weread-keywords 三体,明朝
 ```
 
 #### Docker 运行
@@ -399,6 +403,7 @@ docker run --rm --name user-read \
   -v $HOME/weread-challenge/user/.weread:/app/.weread \
   -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 \
   -e WEREAD_DURATION=180 \
+  -e WEREAD_KEYWORDS=三体,明朝 \
   -e BARK_KEY="your-bark-key-here" \
   docker.io/jqknono/weread-challenge:latest
 ```
@@ -407,7 +412,7 @@ docker run --rm --name user-read \
 
 ```bash
 # Bark推送示例
-00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_SELECTION=2 -e BARK_KEY=your-bark-key-here docker.io/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_KEYWORDS=三体 -e BARK_KEY=your-bark-key-here docker.io/jqknono/weread-challenge:latest
 ```
 
 ### 注意事项
@@ -417,12 +422,12 @@ docker run --rm --name user-read \
 - 支持自定义 Bark 服务器，通过设置 `BARK_SERVER` 环境变量
 - 当脚本检测到微信读书登录二维码并解析出登录链接时，会通过 Bark 推送链接（点击即可打开）
 
-## 登录链接推送配置（Bark + 邮件）
+## 登录链接推送配置（Bark + Webhook）
 
 脚本在检测到新的微信读书登录链接后，会自动推送：
 
 - Bark：配置 `BARK_KEY` 即可启用
-- 邮件：`ENABLE_EMAIL=true` 且配置完整 SMTP 参数后启用
+- Webhook：配置 `WEBHOOK_URL` 即可启用，会发送 JSON POST 请求
 
 Docker Compose `environment` 示例：
 
@@ -432,20 +437,15 @@ environment:
   - WEREAD_DURATION=15
   - WEREAD_SCREENSHOT=false
   - WEREAD_USER=your-user
-  - WEREAD_SELECTION=-1
-  - ENABLE_EMAIL=true
-  - EMAIL_SMTP=smtp.mail.me.com
-  - EMAIL_USER=your-email@icloud.com
-  - EMAIL_PASS=your-app-password
-  - EMAIL_PORT=587
-  - EMAIL_TO=your-receiver@example.com
   - BARK_KEY=your-bark-key
+  - WEBHOOK_URL=https://example.com/weread-webhook
   - DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7
 ```
 
 说明：
 
-- 邮件推送登录链接依赖 `EMAIL_SMTP`、`EMAIL_USER`、`EMAIL_PASS`、`EMAIL_TO`
+- Webhook 接收 `event`、`title`、`body`、`level`、`version`、`timestamp`、`runtime`、`data` 等字段
+- 登录二维码图片使用 `api.qrserver.com` 根据登录链接生成，Bark/Webhook 会收到该图片 URL
 - 若二维码刷新后登录链接变化，会推送新链接
 - 同一个登录链接只推送一次，避免重复提醒
 
@@ -483,32 +483,27 @@ mkdir -p $HOME/weread-challenge/$WEREAD_USER2/.weread
 # 首次启动后需微信扫描二维码登录，二维码保存在：
 # $HOME/weread-challenge/${WEREAD_USER1}/.weread/login.png
 # $HOME/weread-challenge/${WEREAD_USER2}/.weread/login.png
-(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER1}-read -v $HOME/weread-challenge/${WEREAD_USER1}/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER1} docker.io/jqknono/weread-challenge:latest") | crontab -
-(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER2}-read -v $HOME/weread-challenge/${WEREAD_USER2}/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER2} docker.io/jqknono/weread-challenge:latest") | crontab -
+(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER1}-read -v $HOME/weread-challenge/${WEREAD_USER1}/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER1} -e WEREAD_KEYWORDS=三体,明朝 docker.io/jqknono/weread-challenge:latest") | crontab -
+(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER2}-read -v $HOME/weread-challenge/${WEREAD_USER2}/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER2} -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 docker.io/jqknono/weread-challenge:latest") | crontab -
 ```
 
 ## 可配置项
 
-| 环境变量                | 默认值                                                    | 可选值                                | 说明                                                                                            |
-| ----------------------- | --------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `WEREAD_USER`           | `weread-default`                                          | -                                     | 用户标识                                                                                        |
-| `WEREAD_REMOTE_BROWSER` | ""                                                        | -                                     | 远程浏览器地址                                                                                  |
-| `WEREAD_DURATION`       | `10`                                                      | -                                     | 阅读时长                                                                                        |
-| `WEREAD_SPEED`          | `slow`                                                    | `slow,normal,fast`                    | 阅读速度                                                                                        |
-| `WEREAD_SCREENSHOT`     | `true`                                                    | `true,false`                          | 阅读期间每分钟截图                                                                              |
-| `WEREAD_SELECTION`      | `2`                                                       | `-1,0,1,2,3,4`                        | 选书方式，`-1` 直接读取 `DEFAULT_BOOK_URL`，`0` 随机选择第 1 到 4 本，`1-4` 表示书架中的第 N 本 |
-| `DEFAULT_BOOK_URL`      | https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 | -                                     | 默认阅读链接，`WEREAD_SELECTION=-1` 或书架中未找到可点击书籍时会直接使用                        |
-| `WEREAD_BROWSER`        | `chrome`                                                  | `chrome,MicrosoftEdge,firefox,safari` | 浏览器                                                                                          |
-| `ENABLE_EMAIL`          | `false`                                                   | `true,false`                          | 邮件通知                                                                                        |
-| `EMAIL_SMTP`            | ""                                                        | -                                     | 邮箱 SMTP 服务器                                                                                |
-| `EMAIL_PORT`            | `465`                                                     | `25,465,587`                          | 邮箱 SMTP 端口                                                                                  |
-| `EMAIL_USER`            | ""                                                        | -                                     | 邮箱用户名                                                                                      |
-| `EMAIL_PASS`            | ""                                                        | -                                     | 邮箱密码                                                                                        |
-| `EMAIL_FROM`            | ""                                                        | -                                     | 发件人                                                                                          |
-| `EMAIL_TO`              | ""                                                        | -                                     | 收件人                                                                                          |
-| `BARK_KEY`              | ""                                                        | -                                     | Bark 推送密钥                                                                                   |
-| `BARK_SERVER`           | `https://api.day.app`                                     | -                                     | Bark 服务器地址                                                                                 |
-| `WEREAD_AGREE_TERMS`    | `true`                                                    | `true,false`                          | 隐私同意条款                                                                                    |
+| 环境变量                | 默认值           | 可选值                                | 说明                                                                      |
+| ----------------------- | ---------------- | ------------------------------------- | ------------------------------------------------------------------------- |
+| `DEBUG`                 | `false`          | `true,false`                          | 开启调试日志                                                              |
+| `WEREAD_USER`           | `weread-default` | -                                     | 用户标识                                                                  |
+| `WEREAD_REMOTE_BROWSER` | ""               | -                                     | 远程浏览器地址                                                            |
+| `WEREAD_DURATION`       | `10`             | -                                     | 阅读时长                                                                  |
+| `WEREAD_SPEED`          | `slow`           | `slow,normal,fast`                    | 阅读速度                                                                  |
+| `WEREAD_SCREENSHOT`     | `true`           | `true,false`                          | 阅读期间每分钟截图                                                        |
+| `WEREAD_DATA_DIR`       | `./.weread`      | -                                     | cookies、登录二维码、日志和截图的数据目录                                 |
+| `DEFAULT_BOOK_URL`      | ""               | -                                     | 指定后直接打开该阅读链接；优先级高于 `WEREAD_KEYWORDS`                    |
+| `WEREAD_KEYWORDS`       | ""               | -                                     | 未配置 `DEFAULT_BOOK_URL` 时使用，按英文逗号分隔，从“我的书架”匹配书名    |
+| `WEREAD_BROWSER`        | `chrome`         | `chrome,MicrosoftEdge,firefox,safari` | 浏览器                                                                    |
+| `BARK_KEY`              | ""               | -                                     | Bark 推送密钥                                                             |
+| `BARK_SERVER`           | `https://api.day.app` | -                                | Bark 服务器地址                                                           |
+| `WEBHOOK_URL`           | ""               | `http,https`                          | Webhook 通知地址                                                          |
 
 <!-- ## 容器多架构支持
 
@@ -530,23 +525,16 @@ docker buildx build --platform linux/amd64,linux/arm64 -t docker.io/jqknono/were
 - **时长计算**：28 日刷满 30 小时，需每日至少 65 分钟，而不是每日 60 分钟
 - **统计误差**：微信读书统计可能会漏数分钟，期望每日获得 65 分钟，建议调整阅读时长到 68 分钟
 - **登录有效期**：网页扫码登录 cookies 有效期为 30 天，实测登录一次可以长期有效
-- **邮件通知**：邮件通知可能被识别为垃圾邮件，建议在收件方添加白名单
 - **使用声明**：本项目仅供学习交流使用，请勿用于商业用途，请勿用于违法用途
 
-## 隐私政策
+## 隐私提示
 
-- **隐私获取**
-  - 本项目搜集使用者的 `cookies` 部分信息，以用于使用者统计和展示
-  - 搜集使用者的使用信息，包含：`用户名称 | 首次使用时间 | 最近使用时间 | 总使用次数 | 浏览器类型 | 操作系统类别 | 阅读时长设置 | 异常退出原因`
-  - 如不希望被搜集任何信息，可设置启动参数 `WEREAD_AGREE_TERMS=false`
-- **风险提示**
-  - `cookies` 可用于微信读书网页登录，登录后可以执行书架操作，但**本工具不会使用搜集的信息进行登录操作**
-  - 腾讯保护机制确保异常登录时，手机客户端将收到风险提示，可在手机客户端 `设置` -> `登录设备` 中确认登录设备
-  - 本工具纯 JavaScript 实现，第三方可以继续开发。即使信任本工具，也应在使用自动化工具时，经常确认登录设备，避免书架被恶意操作
+- `cookies` 仅保存在本地数据目录，用于复用微信读书网页登录状态
+- 腾讯保护机制确保异常登录时，手机客户端将收到风险提示，可在手机客户端 `设置` -> `登录设备` 中确认登录设备
+- 本工具纯 JavaScript 实现，第三方可以继续开发。即使信任本工具，也应在使用自动化工具时，经常确认登录设备，避免书架被恶意操作
 
 ## 参考
 
 - npm 包: [weread-selenium-cli](https://www.npmjs.com/package/weread-selenium-cli)
 - 开源地址: [https://github.com/jqknono/weread-challenge-selenium](https://github.com/jqknono/weread-challenge-selenium)
-- 统计: [https://weread-challenge.techfetch.dev](https://weread-challenge.techfetch.dev)
 - 文章来源: [https://blog.techfetch.dev](https://blog.techfetch.dev/blog/2024/12/05/%E5%BE%AE%E4%BF%A1%E8%AF%BB%E4%B9%A6%E8%87%AA%E5%8A%A8%E6%89%93%E5%8D%A1%E5%88%B7%E6%97%B6%E9%95%BF/)

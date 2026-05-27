@@ -76,5 +76,7 @@ docker load -i weread-challenge-latest.tar
 4. 加载完成后按本地 tag 运行，例如：
 
 ```bash
-docker run --rm jqknono/weread-challenge:latest
+docker run --rm \
+  -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 \
+  jqknono/weread-challenge:latest
 ```

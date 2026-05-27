@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseDurationConfig, parseKeywords } = require('../src/config');
+const { parseDurationConfig, parseKeywords, createRuntimeConfig } = require('../src/config');
+const {
+  RUN_OPTION_SPECS,
+  getRuntimeConfigSnapshot,
+  setRuntimeConfigFromEnv,
+} = require('../src/weread-challenge');
 const {
   getChapterJumpIndex,
   extractProjectLocation,
@@ -29,6 +34,76 @@ test('parseDurationConfig: 非法区间回退到默认值 10', () => {
 test('parseKeywords: 去除空白与空项', () => {
   const keywords = parseKeywords('  历史, 科幻 ,, 经济学  ');
   assert.deepEqual(keywords, ['历史', '科幻', '经济学']);
+});
+
+function hasLegacyMailConfig(value) {
+  return Object.keys(value).some((key) => key.includes('MAIL'));
+}
+
+test('运行配置: 支持 Webhook 且不再暴露旧通知配置', () => {
+  const config = createRuntimeConfig({ WEBHOOK_URL: 'https://example.com/hook' }, {
+    logger: { info: () => {}, warn: () => {} },
+  });
+
+  assert.equal(config.DATA_DIR, './.weread');
+  assert.equal(config.COOKIE_FILE, './.weread/cookies.json');
+  assert.equal(config.LOGIN_QR_CODE, './.weread/login.png');
+  assert.equal(config.WEBHOOK_URL, 'https://example.com/hook');
+  assert.equal(hasLegacyMailConfig(config), false);
+
+  setRuntimeConfigFromEnv({
+    WEBHOOK_URL: 'https://example.com/hook',
+    WEREAD_DURATION: '10',
+  }, { quiet: true });
+
+  const snapshot = getRuntimeConfigSnapshot();
+  assert.equal(snapshot.WEBHOOK_URL, 'https://example.com/hook');
+  assert.equal(hasLegacyMailConfig(snapshot), false);
+  assert.equal(RUN_OPTION_SPECS.some((spec) => spec.envKey === 'WEBHOOK_URL'), true);
+  assert.equal(RUN_OPTION_SPECS.some((spec) => spec.envKey.includes('MAIL')), false);
+});
+
+test('数据目录配置: 默认使用 .weread，显式配置时保留覆盖', () => {
+  setRuntimeConfigFromEnv({
+    WEREAD_DURATION: '10',
+  }, { quiet: true });
+
+  assert.equal(getRuntimeConfigSnapshot().WEREAD_DATA_DIR, '.weread');
+
+  setRuntimeConfigFromEnv({
+    WEREAD_DATA_DIR: '  ./custom-data  ',
+    WEREAD_DURATION: '10',
+  }, { quiet: true });
+
+  assert.equal(getRuntimeConfigSnapshot().WEREAD_DATA_DIR, './custom-data');
+  assert.equal(RUN_OPTION_SPECS.some((spec) => spec.envKey === 'WEREAD_DATA_DIR'), true);
+});
+
+test('选书配置: 不再暴露 WEREAD_SELECTION，使用 URL 优先和关键词书架匹配', () => {
+  const config = createRuntimeConfig({
+    DEFAULT_BOOK_URL: '  https://weread.qq.com/web/reader/example  ',
+    WEREAD_KEYWORDS: '三体, 历史',
+  }, {
+    logger: { info: () => {}, warn: () => {} },
+  });
+
+  assert.equal(config.DEFAULT_BOOK_URL, 'https://weread.qq.com/web/reader/example');
+  assert.deepEqual(config.WEREAD_KEYWORDS_LIST, ['三体', '历史']);
+  assert.equal(Object.hasOwn(config, 'WEREAD_SELECTION'), false);
+
+  setRuntimeConfigFromEnv({
+    DEFAULT_BOOK_URL: '  https://weread.qq.com/web/reader/example  ',
+    WEREAD_KEYWORDS: '三体',
+    WEREAD_DURATION: '10',
+  }, { quiet: true });
+
+  const snapshot = getRuntimeConfigSnapshot();
+  assert.equal(snapshot.DEFAULT_BOOK_URL, 'https://weread.qq.com/web/reader/example');
+  assert.equal(snapshot.WEREAD_KEYWORDS, '三体');
+  assert.equal(Object.hasOwn(snapshot, 'WEREAD_SELECTION'), false);
+  assert.equal(RUN_OPTION_SPECS.some((spec) => spec.envKey === 'WEREAD_SELECTION'), false);
+  assert.equal(RUN_OPTION_SPECS.some((spec) => spec.envKey === 'DEFAULT_BOOK_URL'), true);
+  assert.equal(RUN_OPTION_SPECS.some((spec) => spec.envKey === 'WEREAD_KEYWORDS'), true);
 });
 
 test('章节跳转索引: 仅有 1 章时返回 0，避免越界', () => {

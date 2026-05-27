@@ -5,6 +5,7 @@ services:
     environment:
       - WEREAD_REMOTE_BROWSER=http://selenium:4444
       - WEREAD_DURATION=68
+      - DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7
     volumes:
       - ./.weread:/app/.weread
     depends_on:
