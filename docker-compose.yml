@@ -1,32 +1,15 @@
 services:
   app:
-    image: jqknono/weread-challenge:latest
+    image: gaohaha445/weread-challenge:latest
     pull_policy: always
     environment:
-      - WEREAD_REMOTE_BROWSER=http://selenium:4444
       - WEREAD_DURATION=68
+      - WEREAD_HEADLESS=true
       - DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7
+      # 如果不想固定阅读链接，删除 DEFAULT_BOOK_URL 后改用：
+      # - WEREAD_KEYWORDS=三体,明朝
     volumes:
       - ./.weread:/app/.weread
-    depends_on:
-      selenium:
-        condition: service_healthy
-    dns:
-      - 223.5.5.5
-  selenium:
-    image: selenium/standalone-chromium:latest
-    pull_policy: if_not_present
     shm_size: 2gb
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - SE_ENABLE_TRACING=false
-      - SE_BIND_HOST=false
-      - SE_JAVA_DISABLE_HOSTNAME_VERIFICATION=false
     dns:
       - 223.5.5.5
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://selenium:4444/status"]
-      interval: 5s
-      timeout: 60s
-      retries: 10

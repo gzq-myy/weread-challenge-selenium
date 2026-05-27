@@ -118,8 +118,8 @@ function runDockerSmoke() {
 
   try {
     runCommand('docker', ['build', '-t', imageTag, '.']);
-    const helpOutput = runCommand('docker', ['run', '--rm', imageTag, 'node', 'app.js', '-h']);
-    assertHelpOutput(helpOutput, 'docker run <image> node app.js -h');
+    const helpOutput = runCommand('docker', ['run', '--rm', imageTag, 'node', 'src/weread-challenge.js', '-h']);
+    assertHelpOutput(helpOutput, 'docker run <image> node src/weread-challenge.js -h');
     console.log('Smoke passed: Docker image entrypoint is runnable.');
   } finally {
     spawnSync('docker', ['image', 'rm', '-f', imageTag], {

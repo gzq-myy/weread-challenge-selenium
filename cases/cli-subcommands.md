@@ -8,8 +8,9 @@
 | 兼容旧入口 | 执行 `node src/weread-challenge.js` | 先提示应改用 `run` 子命令，再按原行为进入自动阅读主流程 |
 | 兼容旧全局命令 | 全局安装或 `npm link` 后执行 `weread-challenge` | 进入与 `weread-selenium-cli run` 相同的 CLI 入口与主流程 |
 | 显式运行主流程 | 执行 `node src/weread-challenge.js run --weread-keywords 三体` | 行为与旧入口一致，并按关键词从“我的书架”选书 |
-| `run` 参数覆盖环境变量 | 先设置环境变量 `WEREAD_BROWSER=chrome`，再执行 `node src/weread-challenge.js run --weread-browser firefox` | 实际运行配置使用 `firefox` |
+| `run` 参数覆盖环境变量 | 先设置环境变量 `WEREAD_BROWSER=chrome`，再执行 `node src/weread-challenge.js run --weread-browser edge` | 实际运行配置使用 `edge` |
 | `run` 支持原始环境变量名参数 | 执行 `node src/weread-challenge.js run --WEREAD_DURATION 30` | 实际运行配置中的阅读时长为 `30` 分钟 |
+| `run` 打开可见浏览器 | 执行 `node src/weread-challenge.js run --weread-headless false --weread-keywords 三体` | 使用 Patchright 打开可见 Chromium 窗口，便于观察实际阅读效果 |
 | `run` 默认数据目录 | 未设置 `WEREAD_DATA_DIR` 时执行 `node src/weread-challenge.js run --weread-keywords 三体` | cookies、二维码、日志、截图写入当前工作目录下的 `.weread/` |
 | `run` 显式数据目录覆盖 | 执行 `node src/weread-challenge.js run --weread-data-dir custom-data --weread-keywords 三体` | 运行产物只写入 `custom-data/` |
 | `run` 固定链接选书 | 执行 `node src/weread-challenge.js run --default-book-url https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7` | 登录成功后直接打开指定阅读链接 |

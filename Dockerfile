@@ -1,8 +1,9 @@
-FROM node:lts-alpine
+FROM node:lts-bookworm-slim
 
 WORKDIR /app
-COPY ./src/weread-challenge.js ./app.js
 COPY package.json package-lock.json ./
 RUN npm install --omit=dev
+RUN npx patchright install --with-deps chromium
+COPY ./src ./src
 
-CMD ["node", "app.js"]
+CMD ["node", "src/weread-challenge.js", "run"]

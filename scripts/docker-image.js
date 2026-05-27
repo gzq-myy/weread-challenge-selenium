@@ -21,7 +21,7 @@ Commands:
 
 Options:
   --image <name>            Target image name
-                            default: docker.io/jqknono/weread-challenge
+                            default: docker.io/gaohaha445/weread-challenge
   --tag <tag>               Primary tag
                             default: package.json version (${packageJson.version})
   --extra-tags <list>       Extra tags separated by commas
@@ -97,7 +97,7 @@ function uniqueTags(tags) {
 }
 
 function resolveConfig(rawOptions) {
-  const image = rawOptions.image || process.env.DOCKER_IMAGE || 'docker.io/jqknono/weread-challenge';
+  const image = rawOptions.image || process.env.DOCKER_IMAGE || 'docker.io/gaohaha445/weread-challenge';
   const tag = rawOptions.tag || process.env.DOCKER_TAG || packageJson.version;
   const extraTags = uniqueTags(
     (rawOptions['extra-tags'] || process.env.DOCKER_EXTRA_TAGS || '')

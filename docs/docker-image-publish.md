@@ -13,7 +13,7 @@
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `--image` | `docker.io/jqknono/weread-challenge` | 目标镜像仓库 |
+| `--image` | `docker.io/gaohaha445/weread-challenge` | 目标镜像仓库 |
 | `--tag` | `package.json` 中的 `version` | 主 tag |
 | `--extra-tags` | 空 | 额外 tag，使用英文逗号分隔 |
 | `--platform` | 空 | 透传给 `docker build --platform` |
@@ -78,5 +78,5 @@ docker load -i weread-challenge-latest.tar
 ```bash
 docker run --rm \
   -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 \
-  jqknono/weread-challenge:latest
+  gaohaha445/weread-challenge:latest
 ```

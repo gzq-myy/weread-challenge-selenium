@@ -50,7 +50,9 @@ function createRuntimeConfig(env = process.env, options = {}) {
     URL: 'https://weread.qq.com/',
     DEBUG: env.DEBUG === 'true',
     WEREAD_USER: env.WEREAD_USER || 'weread-default',
-    WEREAD_REMOTE_BROWSER: env.WEREAD_REMOTE_BROWSER,
+    WEREAD_HEADLESS: env.WEREAD_HEADLESS === undefined
+      ? true
+      : !['false', '0', 'no', 'off'].includes(String(env.WEREAD_HEADLESS).trim().toLowerCase()),
     WEREAD_DURATION: duration,
     WEREAD_SPEED: env.WEREAD_SPEED || 'slow',
     WEREAD_BROWSER: env.WEREAD_BROWSER || 'chrome',

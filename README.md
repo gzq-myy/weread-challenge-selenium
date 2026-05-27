@@ -2,8 +2,6 @@
 
 只为便宜一点买微信读书会员。
 
-![只为便宜一点买微信读书会员](https://img1.techfetch.dev/blog/202412261741639.gif)
-
 ## 快速开始
 
 ```bash
@@ -39,8 +37,8 @@ docker compose up -d
 
 ## 工具特性
 
-- 使用有头浏览器
-- 支持本地浏览器和远程浏览器
+- 使用 Patchright Chromium 自动化浏览器
+- 支持 headless 后台运行，也支持 `WEREAD_HEADLESS=false` 打开可见浏览器观察效果
 - 随机浏览器宽度和高度
 - 支持等待登录
 - 支持登录二维码刷新
@@ -63,7 +61,7 @@ docker compose up -d
 - 多平台支持: `linux | windows | macos`
 - 支持架构: `amd64`
 <!-- - 多架构支持: `amd64 | arm64` -->
-- 支持浏览器: `chrome | MicrosoftEdge | firefox | safari`
+- 支持浏览器: `chrome | edge`
 - 支持多用户
 - 异常时强制刷新
 
@@ -83,7 +81,7 @@ npx weread-selenium-cli -h
 npx weread-selenium-cli run --default-book-url https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7
 
 # run 参数会覆盖同名环境变量；未指定 DEFAULT_BOOK_URL 时按关键词从书架选书
-npx weread-selenium-cli run --weread-browser firefox --weread-duration 30 --weread-keywords 三体,明朝
+npx weread-selenium-cli run --weread-browser chrome --weread-duration 30 --weread-keywords 三体,明朝
 
 # 生成 Windows 计划任务创建命令
 npx weread-selenium-cli schedule --name weread-hourly --every 60 --platform windows
@@ -117,6 +115,7 @@ cd $HOME/Documents/weread-challenge
 
 # 安装 npm 包
 npm install -g weread-selenium-cli
+npx patchright install chromium
 
 # 设置环境变量并运行
 export WEREAD_BROWSER="chrome"
@@ -137,15 +136,15 @@ npx weread-selenium-cli run --weread-keywords 三体,明朝
 ```bash
 # 安装依赖
 npm install
+npx patchright install chromium
 
-# 本地浏览器运行
+# 本地可见浏览器运行，便于观察实际效果
 npm run dev
 
 # 本地浏览器 + DEBUG 日志
 npm run debug
 
 # 使用 package.json 内置示例参数运行
-# 注意：npm run start 中的 WEREAD_REMOTE_BROWSER 是示例地址，需按实际环境调整
 npm run start
 ```
 
@@ -154,37 +153,19 @@ npm run start
 ```yaml
 services:
   app:
-    image: docker.io/jqknono/weread-challenge:latest
+    image: docker.io/gaohaha445/weread-challenge:latest
     pull_policy: always
     environment:
-      - WEREAD_REMOTE_BROWSER=http://selenium:4444
       - WEREAD_DURATION=68
+      - WEREAD_HEADLESS=true
       - DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7
+      # 如果不想固定阅读链接，删除 DEFAULT_BOOK_URL 后改用：
+      # - WEREAD_KEYWORDS=三体,明朝
     volumes:
       - ./.weread:/app/.weread
-    depends_on:
-      selenium:
-        condition: service_healthy
-    dns:
-      - 223.5.5.5
-
-  selenium:
-    image: selenium/standalone-chromium:latest
-    pull_policy: if_not_present
     shm_size: 2gb
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - SE_ENABLE_TRACING=false
-      - SE_BIND_HOST=false
-      - SE_JAVA_DISABLE_HOSTNAME_VERIFICATION=false
     dns:
       - 223.5.5.5
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4444/status"]
-      interval: 5s
-      timeout: 60s
-      retries: 10
 ```
 
 将以上内容保存为 `docker-compose.yml` 文件，然后运行：
@@ -195,46 +176,26 @@ docker compose up -d
 
 首次启动后，需要微信扫描二维码登录，二维码保存在 `./.weread/login.png`
 如果你仍在沿用旧版 `./data:/app/data` 挂载，请显式设置 `WEREAD_DATA_DIR=/app/data`；新部署示例统一使用 `./.weread:/app/.weread`。
+Docker 镜像内已安装 Patchright Chromium，不需要 Selenium sidecar 或 `WEREAD_REMOTE_BROWSER`。
 
 ### Docker 运行
 
 ```bash
-# 创建网络
-docker network create weread-challenge-net
-
-# 启动 Selenium 服务
-docker run --restart always -d --name selenium-live \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --shm-size="2g" \
-  --network weread-challenge-net \
-  --hostname selenium-live \
-  --dns 119.29.29.29 \
-  --dns 223.5.5.5 \
-  -p 4444:4444 \
-  -p 7900:7900 \
-  -e SE_ENABLE_TRACING=false \
-  -e SE_BIND_HOST=false \
-  -e SE_JAVA_DISABLE_HOSTNAME_VERIFICATION=false \
-  -e SE_NODE_MAX_INSTANCES=10 \
-  -e SE_NODE_MAX_SESSIONS=10 \
-  -e SE_NODE_OVERRIDE_MAX_SESSIONS=true \
-  selenium/standalone-chromium:latest
-
 # 运行微信读书挑战
 docker run --rm --name user-read \
   -v $HOME/weread-challenge/user/.weread:/app/.weread \
-  -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 \
   -e WEREAD_DURATION=68 \
   -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 \
-  docker.io/jqknono/weread-challenge:latest
+  --shm-size="2g" \
+  docker.io/gaohaha445/weread-challenge:latest
 
 # 添加第二个用户
 docker run --rm --name user2-read \
   -v $HOME/weread-challenge/user2/.weread:/app/.weread \
-  -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 \
   -e WEREAD_DURATION=68 \
   -e WEREAD_KEYWORDS=三体,明朝 \
-  docker.io/jqknono/weread-challenge:latest
+  --shm-size="2g" \
+  docker.io/gaohaha445/weread-challenge:latest
 ```
 
 首次启动后，需要微信扫描二维码登录，二维码保存在 `./.weread/login.png`
@@ -243,8 +204,8 @@ docker run --rm --name user2-read \
 
 有两种方式添加定时任务：
 
-- **docker-compose 方式**：通过 `docker-compose` 启动，浏览器环境配置简单，一键启动，每个浏览器实例对应一个用户
-- **docker 方式**：通过 `docker` 启动，工具使用远程浏览器特性连接到浏览器实例，浏览器环境可能需要自行调整，支持单浏览器多用户
+- **docker-compose 方式**：通过 `docker-compose` 启动，Patchright Chromium 内置在应用容器中
+- **docker 方式**：通过 `docker run` 启动，每个容器对应一个用户数据目录
 
 #### docker-compose 方式
 
@@ -255,33 +216,17 @@ cd $WORKDIR
 cat > $WORKDIR/docker-compose.yml <<EOF
 services:
   app:
-    image: docker.io/jqknono/weread-challenge:latest
+    image: docker.io/gaohaha445/weread-challenge:latest
     pull_policy: always
     environment:
-      - WEREAD_REMOTE_BROWSER=http://selenium:4444
       - WEREAD_DURATION=68
+      - WEREAD_HEADLESS=true
       - DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7
+      # 如果不想固定阅读链接，删除 DEFAULT_BOOK_URL 后改用：
+      # - WEREAD_KEYWORDS=三体,明朝
     volumes:
       - ./.weread:/app/.weread
-    depends_on:
-      selenium:
-        condition: service_healthy
-
-  selenium:
-    image: selenium/standalone-chromium:latest
-    pull_policy: if_not_present
     shm_size: 2gb
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - SE_ENABLE_TRACING=false
-      - SE_BIND_HOST=false
-      - SE_JAVA_DISABLE_HOSTNAME_VERIFICATION=false
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
-      interval: 5s
-      timeout: 60s
-      retries: 10
 EOF
 # 首次启动后, 需微信扫描二维码登录, 二维码保存在 $HOME/weread-challenge/.weread/login.png
 # 每隔6个小时, 阅读68分钟
@@ -291,42 +236,21 @@ EOF
 #### docker 方式
 
 ```bash
-# 创建网络
-docker network create weread-challenge-net
-
-# 启动浏览器
-docker run --restart always -d --name selenium-live \
-  --network weread-challenge-net \
-  --hostname selenium-live \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --shm-size="2g" \
-  -p 4444:4444 \
-  -p 7900:7900 \
-  -e SE_ENABLE_TRACING=false \
-  -e SE_BIND_HOST=false \
-  -e SE_JAVA_DISABLE_HOSTNAME_VERIFICATION=false \
-  -e SE_NODE_MAX_INSTANCES=3 \
-  -e SE_NODE_MAX_SESSIONS=3 \
-  -e SE_NODE_OVERRIDE_MAX_SESSIONS=true \
-  -e SE_SESSION_REQUEST_TIMEOUT=10 \
-  -e SE_SESSION_RETRY_INTERVAL=3 \
-  selenium/standalone-chromium:latest
-
 WEREAD_USER="user"
 mkdir -p $HOME/weread-challenge/$WEREAD_USER/.weread
 # 首次启动后, 需微信扫描二维码登录, 二维码保存在 $HOME/weread-challenge/$WEREAD_USER/.weread/login.png
 # 每隔6个小时, 阅读68分钟
-(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER}-read -v $HOME/weread-challenge/${WEREAD_USER}/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER} -e WEREAD_KEYWORDS=三体,明朝 docker.io/jqknono/weread-challenge:latest") | crontab -
+(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER}-read -v $HOME/weread-challenge/${WEREAD_USER}/.weread:/app/.weread --shm-size=2g -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER} -e WEREAD_KEYWORDS=三体,明朝 docker.io/gaohaha445/weread-challenge:latest") | crontab -
 ```
 
 crontab 示例：
 
 ```bash
-00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_KEYWORDS=三体 -e WEBHOOK_URL=https://example.com/weread-webhook docker.io/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --shm-size=2g -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_KEYWORDS=三体 -e WEBHOOK_URL=https://example.com/weread-webhook docker.io/gaohaha445/weread-challenge:latest
 
-00 01 * * * docker run --rm --name user2-read -v /home/test/weread-challenge/user2/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user2 -e WEREAD_KEYWORDS=历史,科幻 -e WEBHOOK_URL=https://example.com/weread-webhook docker.io/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user2-read -v /home/test/weread-challenge/user2/.weread:/app/.weread --shm-size=2g -e WEREAD_DURATION=180 -e WEREAD_USER=user2 -e WEREAD_KEYWORDS=历史,科幻 -e WEBHOOK_URL=https://example.com/weread-webhook docker.io/gaohaha445/weread-challenge:latest
 
-00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 -e BARK_KEY=your-bark-key-here docker.io/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --shm-size=2g -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 -e BARK_KEY=your-bark-key-here docker.io/gaohaha445/weread-challenge:latest
 ```
 
 ## Windows
@@ -341,9 +265,10 @@ Set-Location "$HOME\Documents\weread-challenge"
 
 # 安装 npm 包
 npm install -g weread-selenium-cli
+npx patchright install chromium
 
 # 设置环境变量并运行
-$env:WEREAD_BROWSER="MicrosoftEdge"
+$env:WEREAD_BROWSER="edge"
 $env:WEREAD_KEYWORDS="三体,明朝"
 weread-selenium-cli run
 ```
@@ -362,12 +287,10 @@ cd $HOME/Documents/weread-challenge
 
 # 安装 npm 包
 npm install -g weread-selenium-cli
-
-# 启用 Safari 自动化支持
-sudo safaridriver --enable
+npx patchright install chromium
 
 # 设置环境变量并运行
-export WEREAD_BROWSER="safari"
+export WEREAD_BROWSER="chrome"
 export WEREAD_KEYWORDS="三体,明朝"
 weread-selenium-cli run
 ```
@@ -401,18 +324,18 @@ npx weread-selenium-cli run --weread-keywords 三体,明朝
 ```bash
 docker run --rm --name user-read \
   -v $HOME/weread-challenge/user/.weread:/app/.weread \
-  -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 \
   -e WEREAD_DURATION=180 \
   -e WEREAD_KEYWORDS=三体,明朝 \
   -e BARK_KEY="your-bark-key-here" \
-  docker.io/jqknono/weread-challenge:latest
+  --shm-size="2g" \
+  docker.io/gaohaha445/weread-challenge:latest
 ```
 
 #### Crontab 定时任务示例
 
 ```bash
 # Bark推送示例
-00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_KEYWORDS=三体 -e BARK_KEY=your-bark-key-here docker.io/jqknono/weread-challenge:latest
+00 01 * * * docker run --rm --name user1-read -v /home/test/weread-challenge/user1/.weread:/app/.weread --shm-size=2g -e WEREAD_DURATION=180 -e WEREAD_USER=user1 -e WEREAD_KEYWORDS=三体 -e BARK_KEY=your-bark-key-here docker.io/gaohaha445/weread-challenge:latest
 ```
 
 ### 注意事项
@@ -433,8 +356,8 @@ Docker Compose `environment` 示例：
 
 ```yaml
 environment:
-  - WEREAD_REMOTE_BROWSER=http://selenium:4444
   - WEREAD_DURATION=15
+  - WEREAD_HEADLESS=true
   - WEREAD_SCREENSHOT=false
   - WEREAD_USER=your-user
   - BARK_KEY=your-bark-key
@@ -452,25 +375,6 @@ environment:
 ## 多用户支持
 
 ```bash
-# 创建桥接网络
-docker network create weread-challenge-net
-
-# 启动浏览器服务
-docker run --restart always -d --name selenium-live \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --shm-size="2g" \
-  --network weread-challenge-net \
-  --hostname selenium-live \
-  -p 4444:4444 \
-  -p 7900:7900 \
-  -e SE_ENABLE_TRACING=false \
-  -e SE_BIND_HOST=false \
-  -e SE_JAVA_DISABLE_HOSTNAME_VERIFICATION=false \
-  -e SE_NODE_MAX_INSTANCES=10 \
-  -e SE_NODE_MAX_SESSIONS=10 \
-  -e SE_NODE_OVERRIDE_MAX_SESSIONS=true \
-  selenium/standalone-chromium:latest
-
 # 设置用户名
 WEREAD_USER1="user1"
 WEREAD_USER2="user2"
@@ -483,8 +387,8 @@ mkdir -p $HOME/weread-challenge/$WEREAD_USER2/.weread
 # 首次启动后需微信扫描二维码登录，二维码保存在：
 # $HOME/weread-challenge/${WEREAD_USER1}/.weread/login.png
 # $HOME/weread-challenge/${WEREAD_USER2}/.weread/login.png
-(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER1}-read -v $HOME/weread-challenge/${WEREAD_USER1}/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER1} -e WEREAD_KEYWORDS=三体,明朝 docker.io/jqknono/weread-challenge:latest") | crontab -
-(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER2}-read -v $HOME/weread-challenge/${WEREAD_USER2}/.weread:/app/.weread --network weread-challenge-net -e WEREAD_REMOTE_BROWSER=http://selenium-live:4444 -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER2} -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 docker.io/jqknono/weread-challenge:latest") | crontab -
+(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER1}-read -v $HOME/weread-challenge/${WEREAD_USER1}/.weread:/app/.weread --shm-size=2g -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER1} -e WEREAD_KEYWORDS=三体,明朝 docker.io/gaohaha445/weread-challenge:latest") | crontab -
+(crontab -l 2>/dev/null; echo "00 */6 * * * docker run --rm --name ${WEREAD_USER2}-read -v $HOME/weread-challenge/${WEREAD_USER2}/.weread:/app/.weread --shm-size=2g -e WEREAD_DURATION=68 -e WEREAD_USER=${WEREAD_USER2} -e DEFAULT_BOOK_URL=https://weread.qq.com/web/reader/276323e0813ab90a5g0144d7 docker.io/gaohaha445/weread-challenge:latest") | crontab -
 ```
 
 ## 可配置项
@@ -493,32 +397,17 @@ mkdir -p $HOME/weread-challenge/$WEREAD_USER2/.weread
 | ----------------------- | ---------------- | ------------------------------------- | ------------------------------------------------------------------------- |
 | `DEBUG`                 | `false`          | `true,false`                          | 开启调试日志                                                              |
 | `WEREAD_USER`           | `weread-default` | -                                     | 用户标识                                                                  |
-| `WEREAD_REMOTE_BROWSER` | ""               | -                                     | 远程浏览器地址                                                            |
+| `WEREAD_HEADLESS`       | `true`           | `true,false`                          | 是否以 headless 模式运行 Patchright Chromium                              |
 | `WEREAD_DURATION`       | `10`             | -                                     | 阅读时长                                                                  |
-| `WEREAD_SPEED`          | `slow`           | `slow,normal,fast`                    | 阅读速度                                                                  |
+| `WEREAD_SPEED`          | `slow`           | `slow,normal,fast`                    | 阅读速度；当前间隔约为 fast 1.5-3 秒，normal 3-6 秒，slow 6-12 秒         |
 | `WEREAD_SCREENSHOT`     | `true`           | `true,false`                          | 阅读期间每分钟截图                                                        |
 | `WEREAD_DATA_DIR`       | `./.weread`      | -                                     | cookies、登录二维码、日志和截图的数据目录                                 |
 | `DEFAULT_BOOK_URL`      | ""               | -                                     | 指定后直接打开该阅读链接；优先级高于 `WEREAD_KEYWORDS`                    |
 | `WEREAD_KEYWORDS`       | ""               | -                                     | 未配置 `DEFAULT_BOOK_URL` 时使用，按英文逗号分隔，从“我的书架”匹配书名    |
-| `WEREAD_BROWSER`        | `chrome`         | `chrome,MicrosoftEdge,firefox,safari` | 浏览器                                                                    |
+| `WEREAD_BROWSER`        | `chrome`         | `chrome,edge`                         | 浏览器                                                                    |
 | `BARK_KEY`              | ""               | -                                     | Bark 推送密钥                                                             |
 | `BARK_SERVER`           | `https://api.day.app` | -                                | Bark 服务器地址                                                           |
 | `WEBHOOK_URL`           | ""               | `http,https`                          | Webhook 通知地址                                                          |
-
-<!-- ## 容器多架构支持
-
-支持 `linux/amd64`,`linux/arm64`, 支持树莓派等开发板.
-
-> 注意: 本工具镜像支持 `arm64`, 但`selenium/standalone-chrome:4.26`镜像未编译 `arm64`, 需自行构建. 因此`arm64`架构不支持使用`docker-compose`方式运行.
-> 如需使用`arm64`, 需自行构建`arm64`的`selenium`, 或使用`docker`方式运行, 连接运行在`amd64`的`selenium`.
-
-```bash
-docker buildx create --name weread-challenge
-docker buildx use weread-challenge
-docker buildx inspect --bootstrap
-docker buildx build --platform linux/amd64,linux/arm64 -t jqknono/weread-challenge:base -f Dockerfile.base --push .
-docker buildx build --platform linux/amd64,linux/arm64 -t docker.io/jqknono/weread-challenge:latest -f Dockerfile.quick --push .
-``` -->
 
 ## 注意事项
 

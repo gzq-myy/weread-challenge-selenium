@@ -9,7 +9,7 @@
 
 require("dotenv").config({ quiet: true });
 
-const { By, Builder, Browser, until, Key } = require("selenium-webdriver");
+const { By, Browser, until, Key, createPatchrightDriver } = require("./patchright-driver");
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -17,6 +17,7 @@ const https = require("https");
 const http = require("http");
 const { execSync, spawnSync } = require("child_process");
 const os = require("os");
+const { getChapterJumpIndex } = require("./runtime-utils");
 
 function getWereadVersion() {
   const packageJsonPaths = [
@@ -41,16 +42,41 @@ const WEREAD_URL = "https://weread.qq.com/"; // Replace with the target URL
 const WEREAD_SHELF_URL = new URL("/web/shelf", WEREAD_URL).toString();
 const DEFAULT_WEREAD_DATA_DIR = ".weread";
 const QR_EXPIRED_TEXTS = ["点击刷新二维码", "二维码已失效"]; // 登录二维码过期提示
+const LOGIN_LINK_XPATH =
+  "//*[self::a or self::button][normalize-space(.)='登录']";
+const QR_CODE_IMAGE_XPATH =
+  "//img[contains(concat(' ', normalize-space(@class), ' '), ' wr_login_modal_qr_img ') or contains(@alt, '登录二维码')]";
+const QR_CODE_HINT_XPATH =
+  "//*[self::div or self::span][contains(normalize-space(.), '使用微信扫一扫登录') or contains(normalize-space(.), '登录二维码')]";
+const QR_REFRESH_XPATH =
+  "//*[self::div or self::span or self::button][contains(normalize-space(.), '点击刷新二维码') or contains(normalize-space(.), '二维码已失效')]";
 const SHELF_MARKER_XPATH =
-  "//*[contains(text(), '我的书架') or contains(@href, '/web/shelf') or contains(@class, 'wr_index_mini_shelf_card')]";
+  "//*[self::a or self::div or self::span][normalize-space(.)='我的书架'] | //a[contains(@href, '/web/shelf')] | //a[contains(concat(' ', normalize-space(@class), ' '), ' shelfBook ')]";
+const SHELF_BOOK_CARD_XPATH =
+  "//a[contains(@href, '/web/reader/') and contains(concat(' ', normalize-space(@class), ' '), ' shelfBook ')] | //div[contains(concat(' ', normalize-space(@class), ' '), ' wr_index_mini_shelf_card ')]";
+const READER_CATALOG_BUTTON_XPATH = "//button[@title='目录']";
+const READER_SWITCH_TO_VERTICAL_XPATH =
+  "//button[@title='切换到上下滚动阅读'] | //button[contains(concat(' ', normalize-space(@class), ' '), ' readerControls_item ') and contains(concat(' ', normalize-space(@class), ' '), ' isHorizontalReader ')]";
+const READER_VERTICAL_ACTIVE_XPATH =
+  "//button[contains(concat(' ', normalize-space(@class), ' '), ' readerControls_item ') and contains(concat(' ', normalize-space(@class), ' '), ' isNormalReader ')]";
+const READER_CHAPTER_ITEM_XPATH =
+  "//li[contains(concat(' ', normalize-space(@class), ' '), ' readerCatalog_list_item ')]";
+const READER_NEXT_BUTTON_XPATH =
+  "//button[@title='下一章' or @title='下一页']";
+const READER_RETRY_XPATH =
+  "//*[self::div or self::button][contains(normalize-space(.), '点击重试')]";
+const READER_RESTRICTED_XPATH =
+  "//*[self::span or self::div][contains(normalize-space(.), '开通后即可阅读')]";
+const READER_COMPLETE_XPATH =
+  "//*[self::div or self::span][contains(normalize-space(.), '全 书 完')]";
 let lastPushedLoginLink = "";
 let logStream = null;
 let DEBUG = false; // Enable debug mode
 let WEREAD_USER = "weread-default"; // User to use
-let WEREAD_REMOTE_BROWSER = "";
+let WEREAD_HEADLESS = true;
 let WEREAD_DURATION = 10; // Reading duration in minutes
 let WEREAD_SPEED = "slow"; // Reading speed, slow | normal | fast
-let WEREAD_BROWSER = Browser.CHROME; // Browser to use, chrome | MicrosoftEdge | firefox
+let WEREAD_BROWSER = Browser.CHROME; // Browser to use, chrome | edge
 let WEREAD_SCREENSHOT = true; // Reading期间是否每分钟截图
 let BARK_KEY = ""; // Bark推送密钥
 let BARK_SERVER = "https://api.day.app"; // Bark服务器地址
@@ -59,7 +85,7 @@ let WEREAD_DATA_DIR = DEFAULT_WEREAD_DATA_DIR; // 默认数据目录
 let WEREAD_KEYWORDS = ""; // 关键词选书，逗号分隔
 let DEFAULT_BOOK_URL = ""; // 配置后直接阅读该链接
 // env vars:
-// WEREAD_REMOTE_BROWSER
+// WEREAD_HEADLESS
 // WEREAD_DURATION
 // WEREAD_BROWSER
 // WEREAD_SCREENSHOT
@@ -73,10 +99,10 @@ let DEFAULT_BOOK_URL = ""; // 配置后直接阅读该链接
 const RUN_OPTION_SPECS = [
   { envKey: "DEBUG", flag: "debug", type: "boolean", description: "Enable debug logging." },
   { envKey: "WEREAD_USER", flag: "weread-user", type: "string", description: "Browser profile directory name." },
-  { envKey: "WEREAD_REMOTE_BROWSER", flag: "weread-remote-browser", type: "string", description: "Remote Selenium URL." },
+  { envKey: "WEREAD_HEADLESS", flag: "weread-headless", type: "boolean", description: "Run browser in headless mode." },
   { envKey: "WEREAD_DURATION", flag: "weread-duration", type: "integer", description: "Reading duration in minutes." },
   { envKey: "WEREAD_SPEED", flag: "weread-speed", type: "string", description: "Reading speed: slow | normal | fast." },
-  { envKey: "WEREAD_BROWSER", flag: "weread-browser", type: "string", description: "Browser name: chrome | MicrosoftEdge | firefox | safari." },
+  { envKey: "WEREAD_BROWSER", flag: "weread-browser", type: "string", description: "Browser name: chrome | edge." },
   { envKey: "WEREAD_SCREENSHOT", flag: "weread-screenshot", type: "boolean", description: "Capture screenshots while reading." },
   { envKey: "BARK_KEY", flag: "bark-key", type: "string", description: "Bark notification key." },
   { envKey: "BARK_SERVER", flag: "bark-server", type: "string", description: "Bark server base URL." },
@@ -171,12 +197,22 @@ function parseKeywordList(rawKeywords) {
     .filter((item) => item.length > 0);
 }
 
+function getReadingStepDelayMs(speed = WEREAD_SPEED) {
+  const ranges = {
+    fast: [1500, 3000],
+    normal: [3000, 6000],
+    slow: [6000, 12000],
+  };
+  const [min, max] = ranges[speed] || ranges.slow;
+  return Math.min(max, Math.floor(Math.random() * (max - min + 1)) + min);
+}
+
 async function resolveBookCardTitle(driver, book) {
   const candidateSelectors = [
+    "div.title[title]",
     "div.title",
-    "[class*='title']",
+    "[class~='title'][title]",
     "a[title]",
-    "img[alt]",
   ];
   const candidateAttributes = ["title", "aria-label", "alt"];
 
@@ -241,6 +277,11 @@ async function openShelfForKeywordSelection(driver) {
   console.info("WEREAD_KEYWORDS 已配置，打开我的书架:", WEREAD_SHELF_URL);
   await driver.get(WEREAD_SHELF_URL);
   await driver.wait(until.elementLocated(By.xpath(SHELF_MARKER_XPATH)), 10000);
+  try {
+    await driver.wait(until.elementLocated(By.xpath(SHELF_BOOK_CARD_XPATH)), 10000);
+  } catch (error) {
+    console.warn("打开书架后未等到书籍卡片，继续尝试解析当前页面:", error.message);
+  }
   console.info("已打开我的书架。");
 }
 
@@ -251,7 +292,9 @@ function resolveDefaultDataDir() {
 function setRuntimeConfigFromEnv(env = process.env, options = {}) {
   DEBUG = parseBooleanValue(env.DEBUG, false, false);
   WEREAD_USER = env.WEREAD_USER || "weread-default";
-  WEREAD_REMOTE_BROWSER = env.WEREAD_REMOTE_BROWSER || "";
+  WEREAD_HEADLESS = env.WEREAD_HEADLESS === undefined
+    ? true
+    : parseBooleanValue(env.WEREAD_HEADLESS, true, false);
   WEREAD_DURATION = env.WEREAD_DURATION === undefined
     ? 10
     : parseDurationValue(env.WEREAD_DURATION, 10, options);
@@ -385,66 +428,7 @@ function redirectConsole(method) {
   };
 }
 
-// --- 诊断与健康检查工具函数 ---
-function isHttpUrl(str) {
-  try {
-    const u = new URL(str);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch (_) {
-    return false;
-  }
-}
-
-async function fetchJson(url, timeoutMs = 3000) {
-  return await new Promise((resolve, reject) => {
-    const client = url.startsWith("https:") ? https : http;
-    const req = client.get(url, { timeout: timeoutMs }, (res) => {
-      let data = "";
-      res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => {
-        try {
-          resolve({ statusCode: res.statusCode, body: JSON.parse(data || "{}") });
-        } catch (e) {
-          resolve({ statusCode: res.statusCode, body: data });
-        }
-      });
-    });
-    req.on("timeout", () => {
-      req.destroy(new Error("request timeout"));
-    });
-    req.on("error", reject);
-  });
-}
-
-async function checkSeleniumHealth(remoteUrl) {
-  try {
-    if (!remoteUrl || !isHttpUrl(remoteUrl)) {
-      console.warn("跳过健康检查：WEREAD_REMOTE_BROWSER 未设置或非法。");
-      return null;
-    }
-    // 优先 /status，兼容 /wd/hub/status
-    const base = remoteUrl.endsWith("/") ? remoteUrl.slice(0, -1) : remoteUrl;
-    const endpoints = ["/status", "/wd/hub/status"];
-    for (const ep of endpoints) {
-      try {
-        const { statusCode, body } = await fetchJson(`${base}${ep}`, 3000);
-        if (statusCode >= 200 && statusCode < 300) {
-          const ready = body?.ready ?? body?.value?.ready;
-          console.info(`Selenium 健康检查 ${ep} 响应: ready=${ready}`);
-          return { endpoint: ep, ready, raw: body };
-        }
-      } catch (_) {
-        // 继续尝试下一个端点
-      }
-    }
-    console.warn("Selenium 健康检查失败：所有端点无有效响应。");
-    return null;
-  } catch (e) {
-    console.warn("Selenium 健康检查异常：", e.message || e);
-    return null;
-  }
-}
-
+// --- 诊断工具函数 ---
 function dockerAvailable() {
   try {
     const out = spawnSync("docker", ["version"], { encoding: "utf8" });
@@ -454,7 +438,7 @@ function dockerAvailable() {
   }
 }
 
-function findSeleniumContainers() {
+function findBrowserContainers() {
   try {
     const out = execSync(
       'docker ps --format "{{.ID}}\t{{.Image}}\t{{.Names}}"',
@@ -467,25 +451,25 @@ function findSeleniumContainers() {
         return { id, image, name };
       })
       .filter((x) =>
-        /selenium\/(standalone-|node-).*chrome/i.test(x.image || "") ||
-        /selenium/i.test(x.name || "")
+        /patchright|playwright|chrom/i.test(x.image || "") ||
+        /patchright|playwright|chrom/i.test(x.name || "")
       );
     return hits;
   } catch (e) {
-    console.warn("查找 Selenium 容器失败：", e.message || e);
+    console.warn("查找浏览器容器失败：", e.message || e);
     return [];
   }
 }
 
-function collectSeleniumLogs(tail = 300) {
+function collectBrowserLogs(tail = 300) {
   try {
     if (!dockerAvailable()) {
-      console.warn("Docker 不可用，跳过 selenium 日志抓取。");
+      console.warn("Docker 不可用，跳过浏览器容器日志抓取。");
       return null;
     }
-    const containers = findSeleniumContainers();
+    const containers = findBrowserContainers();
     if (!containers.length) {
-      console.warn("未发现运行中的 selenium 容器，跳过日志抓取。");
+      console.warn("未发现运行中的浏览器容器，跳过日志抓取。");
       return null;
     }
     const ts = new Date()
@@ -493,7 +477,7 @@ function collectSeleniumLogs(tail = 300) {
       .replace(/[:.]/g, "-")
       .replace("T", "_")
       .replace("Z", "");
-    const outFile = path.join(getDataDirPath(), `selenium-logs-${ts}.log`);
+    const outFile = path.join(getDataDirPath(), `browser-logs-${ts}.log`);
     let combined = "";
     for (const c of containers) {
       try {
@@ -507,10 +491,10 @@ function collectSeleniumLogs(tail = 300) {
       }
     }
     fs.writeFileSync(outFile, combined, "utf8");
-    console.info("已抓取 selenium 容器日志:", outFile);
+    console.info("已抓取浏览器容器日志:", outFile);
     return outFile;
   } catch (e) {
-    console.warn("保存 selenium 日志失败：", e.message || e);
+    console.warn("保存浏览器容器日志失败：", e.message || e);
     return null;
   }
 }
@@ -518,8 +502,7 @@ function collectSeleniumLogs(tail = 300) {
 async function collectDiagnostics(reason) {
   try {
     console.warn("开始收集诊断信息，原因：", reason?.toString()?.slice(0, 180) || "未知");
-    await checkSeleniumHealth(WEREAD_REMOTE_BROWSER);
-    collectSeleniumLogs(400);
+    collectBrowserLogs(400);
   } catch (_) {
     // 忽略诊断过程错误
   }
@@ -527,10 +510,6 @@ async function collectDiagnostics(reason) {
 
 async function saveCookies(driver, filePath) {
   let cookies = await driver.manage().getCookies();
-  // If using Safari, set secure to true for all cookies
-  if (WEREAD_BROWSER === Browser.SAFARI) {
-    cookies = cookies.map(cookie => ({ ...cookie, secure: true }));
-  }
   fs.writeFileSync(filePath, JSON.stringify(cookies, null, 2));
   console.info("Cookies saved successfully.");
 }
@@ -550,8 +529,8 @@ async function loadCookies(driver, filePath) {
 
 async function pressDownArrow(driver) {
   await driver.actions().sendKeys(Key.ARROW_DOWN).perform();
-  // keep the key pressed for random time between 50ms to 500ms
-  let randomTime = Math.floor(Math.random() * 450) + 50;
+  // keep the key press short so each step scrolls less aggressively
+  let randomTime = Math.floor(Math.random() * 121) + 40;
   await new Promise((resolve) => setTimeout(resolve, randomTime));
   // release the down arrow key
   await driver.actions().sendKeys(Key.NULL).perform();
@@ -598,7 +577,7 @@ async function findQRCodeElement(driver) {
     // 使用更精确的定位策略，优先查找二维码图片
     const qrCodeImg = await driver.wait(
       until.elementLocated(
-        By.xpath("//img[contains(@class, 'qr') or contains(@src, 'qr') or contains(@alt, '二维码')]")
+        By.xpath(QR_CODE_IMAGE_XPATH)
       ),
       3000
     );
@@ -609,7 +588,7 @@ async function findQRCodeElement(driver) {
       // 备选方案：查找包含"扫码"或"二维码"文本的元素
       await driver.wait(
         until.elementLocated(
-          By.xpath("//*[contains(text(), '扫码') or contains(text(), '二维码')]")
+          By.xpath(QR_CODE_HINT_XPATH)
         ),
         3000
       );
@@ -626,7 +605,7 @@ async function findQRCodeElement(driver) {
 async function extractAndDisplayQRCode(driver) {
   try {
     const qrImg = await driver.findElement(
-      By.xpath("//img[contains(@class, 'qr') or contains(@src, 'qr') or contains(@alt, '二维码')]")
+      By.xpath(QR_CODE_IMAGE_XPATH)
     );
 
     const base64Png = await qrImg.takeScreenshot();
@@ -731,8 +710,7 @@ async function refreshQRCode(driver) {
     const refreshLocators = [
       By.css(".login_dialog_retry_delegate"),
       By.xpath("//div[contains(@class, 'login_dialog_retry_delegate')]"),
-      By.xpath("//div[contains(text(), '点击刷新二维码') and @class='wr_login_modal_qr_overlay_text']"),
-      By.xpath("//div[contains(text(), '点击刷新二维码')]"),
+      By.xpath(QR_REFRESH_XPATH),
       By.xpath("//div[@class='login_dialog_retry_delegate']"),
       By.xpath("//div[contains(@class, 'refresh') or contains(@class, 'retry')]"),
       By.xpath("//button[contains(text(), '刷新')]"),
@@ -1489,79 +1467,12 @@ async function runMain() {
     sound: "beginning"
   });
   try {
-    const capabilities = {
+    driver = await createPatchrightDriver({
       browserName: WEREAD_BROWSER,
-      pageLoadStrategy: 'eager',
-    };
-
-    var browser;
-    switch (WEREAD_BROWSER) {
-      case Browser.CHROME:
-        browser = require("selenium-webdriver/chrome");
-        break;
-      case Browser.EDGE:
-        browser = require("selenium-webdriver/edge");
-        break;
-      case Browser.FIREFOX:
-        browser = require("selenium-webdriver/firefox");
-        break;
-      case Browser.SAFARI:
-        browser = require("selenium-webdriver/safari");
-        break;
-      default:
-        browser = require("selenium-webdriver/chrome");
-        break;
-    }
-
-    let options = new browser.Options();
-    switch (WEREAD_BROWSER) {
-      case Browser.CHROME:
-      case Browser.EDGE:
-        options.addArguments("--no-sandbox");
-        options.addArguments("--disable-gpu");
-        options.addArguments("--disable-dev-shm-usage");
-        options.addArguments("--profile-directory=" + WEREAD_USER);
-        options.addArguments("--disable-infobars");
-        options.addArguments("--disable-extensions");
-        options.addArguments("--disable-notifications");
-        options.addArguments("--disable-popup-blocking");
-        // check if WEREAD_REMOTE_BROWSER is empty
-        if (WEREAD_REMOTE_BROWSER) {
-          // 远端启动前做一次健康检查
-          await checkSeleniumHealth(WEREAD_REMOTE_BROWSER);
-          // Ensure the remote browser URL has a protocol
-          let remoteBrowserUrl = WEREAD_REMOTE_BROWSER;
-          if (!remoteBrowserUrl.startsWith("http://") && !remoteBrowserUrl.startsWith("https://")) {
-            remoteBrowserUrl = "http://" + remoteBrowserUrl;
-          }
-          console.info("WEREAD_REMOTE_BROWSER: ", remoteBrowserUrl);
-          driver = await new Builder()
-            .usingServer(remoteBrowserUrl)
-            .forBrowser(WEREAD_BROWSER)
-            .withCapabilities(capabilities)
-            .setChromeOptions(options)
-            .build();
-        } else {
-          console.info("WEREAD_REMOTE_BROWSER not found. Running locally.");
-          driver = await new Builder()
-            .forBrowser(WEREAD_BROWSER)
-            .withCapabilities(capabilities)
-            .setChromeOptions(options)
-            .build();
-        }
-        break;
-      case Browser.FIREFOX:
-        driver = await new Builder().forBrowser(Browser.FIREFOX).build();
-        break;
-      case Browser.SAFARI:
-        driver = await new Builder()
-          .forBrowser(Browser.SAFARI)
-          .setSafariOptions(options)
-          .build();
-        break;
-      default:
-        break;
-    }
+      dataDir: getDataDirPath(),
+      headless: WEREAD_HEADLESS,
+      user: WEREAD_USER,
+    });
 
     // 全局超时配置，避免单次命令长时间挂起
     await driver.manage().setTimeouts({
@@ -1573,8 +1484,8 @@ async function runMain() {
     console.info("Browser launched successfully.");
 
     // set screen size
-    randomWidth = Math.floor(Math.random() * 1000) + 800;
-    randomHeight = Math.floor(Math.random() * 800) + 700;
+    const randomWidth = Math.floor(Math.random() * 1000) + 800;
+    const randomHeight = Math.floor(Math.random() * 800) + 700;
     await driver
       .manage()
       .window()
@@ -1599,7 +1510,7 @@ async function runMain() {
     // Check if "Login" hyperlink exists
     console.info("Find login links...");
     let loginLinks = await driver.findElements(
-      By.xpath("//a[contains(text(), '登录')]"),
+      By.xpath(LOGIN_LINK_XPATH),
       10000
     );
     if (loginLinks.length > 0) {
@@ -1630,9 +1541,7 @@ async function runMain() {
       }
     }
 
-    let locator1 = By.xpath(
-      "//div[contains(text(), '点击刷新二维码') and @class='wr_login_modal_qr_overlay_text']"
-    );
+    let locator1 = By.xpath(QR_REFRESH_XPATH);
     let locator2 = By.xpath(SHELF_MARKER_XPATH);
 
     let maxRetries = 3;
@@ -1736,12 +1645,10 @@ async function runMain() {
       }
 
       await openShelfForKeywordSelection(driver);
-      const books = await driver.findElements(
-        By.xpath("//div[@class='wr_index_mini_shelf_card']"),
-        10000
-      );
+      const books = await driver.findElements(By.xpath(SHELF_BOOK_CARD_XPATH));
       const matchedBooks = [];
       console.info(`Using keywords to find a book: [${keywords.join(", ")}]`);
+      console.info(`Found ${books.length} shelf book candidates.`);
       for (const book of books) {
         try {
           const title = await resolveBookCardTitle(driver, book);
@@ -1776,31 +1683,27 @@ async function runMain() {
 
     // get button with title equal to "目录"
     await driver.wait(
-      until.elementLocated(By.xpath('//button[@title="目录"]')),
+      until.elementLocated(By.xpath(READER_CATALOG_BUTTON_XPATH)),
       10000
     );
 
-    // 切换到"上下滚动阅读"模式
-    // OLD: 通过 title="切换到上下滚动阅读" 定位
-    // NEW: 通过 class "readerControls_item" + "isHorizontalReader" 定位
-    let switchButton = await driver.findElements(
-      By.xpath(
-        "//button[@title='切换到上下滚动阅读'] | //button[contains(@class, 'readerControls_item') and contains(@class, 'isHorizontalReader')]"
-      )
-    );
+    const verticalActive = await driver.findElements(By.xpath(READER_VERTICAL_ACTIVE_XPATH));
+    let switchButton = await driver.findElements(By.xpath(READER_SWITCH_TO_VERTICAL_XPATH));
     if (switchButton.length > 0) {
       await switchButton[0].click();
       console.info("Switched to vertical scroll mode.");
+    } else if (verticalActive.length > 0) {
+      console.info("Already in vertical scroll mode.");
     } else {
-      console.warn('未找到用于切换为上下滚动阅读的按钮（兼容新老版本定位）');
+      console.warn("未找到阅读模式切换按钮，继续使用当前阅读模式。");
     }
 
     // Wait for button with title "目录"
     await driver.wait(
-      until.elementLocated(By.xpath('//button[@title="目录"]')),
+      until.elementLocated(By.xpath(READER_CATALOG_BUTTON_XPATH)),
       10000
     );
-    console.info("Successfully switched to vertical scroll mode.");
+    console.info("Reader controls are ready.");
 
     await sendNotification("微信读书挑战", "登录成功", {
       event: "login_success",
@@ -1828,14 +1731,7 @@ async function runMain() {
     // log last read time per minute
     while (new Date() < endTime) {
       let currentTime = new Date();
-      // wait for random time between 300ms to 1s
-      let randomTime = Math.floor(Math.random() * 700) + 300;
-      if (WEREAD_SPEED === "fast") {
-        randomTime = Math.floor(Math.random() * 100) + 100;
-      } else if (WEREAD_SPEED === "normal") {
-        randomTime = Math.floor(Math.random() * 400) + 200;
-      }
-      await new Promise((resolve) => setTimeout(resolve, randomTime));
+      await new Promise((resolve) => setTimeout(resolve, getReadingStepDelayMs()));
       if (currentTime.getMinutes() !== screenshotTime.getMinutes()) {
         // take screenshot every minute, and get round index
         let screenshotIndex = Math.round((currentTime - startTime) / 60000);
@@ -1876,7 +1772,7 @@ async function runMain() {
       }
       // check if got a "span" contains text "开通后即可阅读"
       let openBook = await driver.findElements(
-        By.xpath("//span[contains(text(), '开通后即可阅读')]")
+        By.xpath(READER_RESTRICTED_XPATH)
       );
       if (openBook.length > 0) {
         console.warn("需要打开书籍");
@@ -1886,7 +1782,7 @@ async function runMain() {
 
       // find element div with class "readerFooter_ending_title" and content contains "全 书 完"
       let readComplete = await driver.findElements(
-        By.xpath("//div[contains(text(), '全 书 完')]")
+        By.xpath(READER_COMPLETE_XPATH)
       );
       if (readComplete.length > 0) {
         console.warn("书籍已读完");
@@ -1904,7 +1800,7 @@ async function runMain() {
         // jump to the top
         // click the buttion "目录"
         let catalogs = await driver.findElements(
-          By.xpath('//button[@title="目录"]')
+          By.xpath(READER_CATALOG_BUTTON_XPATH)
         );
         if (catalogs.length > 0) {
           await catalogs[0].click();
@@ -1915,16 +1811,17 @@ async function runMain() {
 
         // click the first "li" with class "readerCatalog_list_item"
         let chapters = await driver.findElements(
-          By.xpath("//li[@class='readerCatalog_list_item']")
+          By.xpath(READER_CHAPTER_ITEM_XPATH)
         );
-        if (chapters.length > 0) {
+        const chapterIndex = getChapterJumpIndex(chapters.length);
+        if (chapterIndex >= 0) {
           // scroll to the top
           await driver.executeScript(
             "arguments[0].scrollIntoView();",
             chapters[0]
           );
-          await chapters[1].click();
-          console.info("Clicked on first chapter.");
+          await chapters[chapterIndex].click();
+          console.info("Clicked on chapter index:", chapterIndex);
         } else {
           console.error("Chapters not found.");
         }
@@ -1932,7 +1829,7 @@ async function runMain() {
 
       // find button with title "下一章" or "下一页"
       let nextChapter = await driver.findElements(
-        By.xpath("//button[@title='下一章'] | //button[@title='下一页']")
+        By.xpath(READER_NEXT_BUTTON_XPATH)
       );
       if (nextChapter.length !== 0) {
         // check if the button is shown on the screen
@@ -1946,7 +1843,7 @@ async function runMain() {
 
       // find div with content contains "点击重试", 未确认
       let retry = await driver.findElements(
-        By.xpath("//div[contains(text(), '点击重试')]")
+        By.xpath(READER_RETRY_XPATH)
       );
       if (retry.length > 0) {
         console.warn("Retry button found.");
@@ -1980,7 +1877,7 @@ async function runMain() {
       }
     }
     console.info(errorMessage);
-    // 出错时抓取 selenium 健康状态与容器日志
+    // 出错时抓取浏览器容器日志
     await collectDiagnostics(errorMessage);
     await sendNotification("微信读书挑战", `发生错误：${errorMessage.substring(0, 100)}${errorMessage.length > 100 ? '...' : ''}`, {
       event: "error",
@@ -2007,7 +1904,7 @@ function getRuntimeConfigSnapshot() {
   return {
     DEBUG,
     WEREAD_USER,
-    WEREAD_REMOTE_BROWSER,
+    WEREAD_HEADLESS,
     WEREAD_DURATION,
     WEREAD_SPEED,
     WEREAD_BROWSER,
@@ -2024,6 +1921,7 @@ function getRuntimeConfigSnapshot() {
 module.exports = {
   RUN_OPTION_SPECS,
   applyRunCliOverrides,
+  getReadingStepDelayMs,
   getRuntimeConfigSnapshot,
   parseCliArgs,
   setRuntimeConfigFromEnv,
