@@ -8,6 +8,7 @@ const Browser = {
 
 const Key = {
   ARROW_DOWN: 'ArrowDown',
+  PAGE_DOWN: 'PageDown',
   NULL: 'NULL',
 };
 
@@ -329,6 +330,22 @@ class PatchrightDriver {
 
   actions() {
     return new PatchrightActions(this);
+  }
+
+  async scrollWheel(deltaY, deltaX = 0) {
+    await this.page.mouse.wheel(deltaX, deltaY);
+  }
+
+  async keyDown(key) {
+    await this.page.keyboard.down(key);
+  }
+
+  async keyUp(key) {
+    await this.page.keyboard.up(key);
+  }
+
+  async moveMouse(x, y, steps = 8) {
+    await this.page.mouse.move(x, y, { steps });
   }
 
   async quit() {

@@ -74,6 +74,7 @@ let logStream = null;
 let DEBUG = false; // Enable debug mode
 let WEREAD_USER = "weread-default"; // User to use
 let WEREAD_HEADLESS = true;
+let WEREAD_STARTUP_DELAY = 0; // Startup random delay max minutes
 let WEREAD_DURATION = 10; // Reading duration in minutes
 let WEREAD_SPEED = "slow"; // Reading speed, slow | normal | fast
 let WEREAD_BROWSER = Browser.CHROME; // Browser to use, chrome | edge
@@ -86,6 +87,7 @@ let WEREAD_KEYWORDS = ""; // 关键词选书，逗号分隔
 let DEFAULT_BOOK_URL = ""; // 配置后直接阅读该链接
 // env vars:
 // WEREAD_HEADLESS
+// WEREAD_STARTUP_DELAY
 // WEREAD_DURATION
 // WEREAD_BROWSER
 // WEREAD_SCREENSHOT
@@ -100,6 +102,7 @@ const RUN_OPTION_SPECS = [
   { envKey: "DEBUG", flag: "debug", type: "boolean", description: "Enable debug logging." },
   { envKey: "WEREAD_USER", flag: "weread-user", type: "string", description: "Browser profile directory name." },
   { envKey: "WEREAD_HEADLESS", flag: "weread-headless", type: "boolean", description: "Run browser in headless mode." },
+  { envKey: "WEREAD_STARTUP_DELAY", flag: "weread-startup-delay", type: "integer", description: "Random startup delay max minutes. 0 disables it." },
   { envKey: "WEREAD_DURATION", flag: "weread-duration", type: "integer", description: "Reading duration in minutes." },
   { envKey: "WEREAD_SPEED", flag: "weread-speed", type: "string", description: "Reading speed: slow | normal | fast." },
   { envKey: "WEREAD_BROWSER", flag: "weread-browser", type: "string", description: "Browser name: chrome | edge." },
@@ -190,6 +193,31 @@ function parseDurationValue(value, defaultValue = 10, options = {}) {
   return parsed;
 }
 
+function parseStartupDelayValue(value, defaultValue = 0, options = {}) {
+  const quiet = options.quiet === true;
+  const rawValue = String(value ?? defaultValue).trim();
+  const parsed = Number.parseInt(rawValue, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    if (!quiet) {
+      console.warn(
+        `Invalid startup delay: "${rawValue}". Defaulting to ${defaultValue} minutes.`
+      );
+    }
+    return defaultValue;
+  }
+
+  return parsed;
+}
+
+function getStartupDelayMs(maxDelayMinutes = WEREAD_STARTUP_DELAY, random = Math.random) {
+  const maxDelayMs = Math.max(0, Number(maxDelayMinutes) || 0) * 60 * 1000;
+  if (maxDelayMs <= 0) {
+    return 0;
+  }
+  return Math.min(maxDelayMs, Math.floor(random() * (maxDelayMs + 1)));
+}
+
 function parseKeywordList(rawKeywords) {
   return String(rawKeywords || "")
     .split(",")
@@ -197,14 +225,88 @@ function parseKeywordList(rawKeywords) {
     .filter((item) => item.length > 0);
 }
 
-function getReadingStepDelayMs(speed = WEREAD_SPEED) {
+function getReadingStepDelayMs(speed = WEREAD_SPEED, visibleTextLength = 0) {
   const ranges = {
     fast: [1500, 3000],
     normal: [3000, 6000],
     slow: [6000, 12000],
   };
   const [min, max] = ranges[speed] || ranges.slow;
-  return Math.min(max, Math.floor(Math.random() * (max - min + 1)) + min);
+  const multiplier = getVisibleTextDelayMultiplier(Number(visibleTextLength) || 0);
+  const adjustedMin = Math.max(1000, Math.round(min * multiplier));
+  const adjustedMax = Math.max(adjustedMin, Math.round(max * multiplier));
+  return Math.min(
+    adjustedMax,
+    Math.floor(Math.random() * (adjustedMax - adjustedMin + 1)) + adjustedMin
+  );
+}
+
+function getVisibleTextDelayMultiplier(visibleTextLength) {
+  if (!Number.isFinite(visibleTextLength) || visibleTextLength <= 0) {
+    return 1;
+  }
+  if (visibleTextLength < 120) {
+    return 0.8;
+  }
+  if (visibleTextLength >= 1200) {
+    return 1.65;
+  }
+  if (visibleTextLength >= 700) {
+    return 1.35;
+  }
+  return 1;
+}
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function createReadingGesturePlan(viewportHeight = 800) {
+  const safeViewportHeight = Math.max(500, Number(viewportHeight) || 800);
+  const roll = Math.random();
+
+  if (roll < 0.58) {
+    return {
+      type: "wheel",
+      deltaY: randomInt(
+        Math.round(safeViewportHeight * 0.14),
+        Math.round(safeViewportHeight * 0.42)
+      ),
+    };
+  }
+
+  if (roll < 0.78) {
+    return {
+      type: "arrowDown",
+      holdMs: randomInt(40, 160),
+    };
+  }
+
+  if (roll < 0.88) {
+    return {
+      type: "wheel",
+      deltaY: randomInt(
+        Math.round(safeViewportHeight * 0.04),
+        Math.round(safeViewportHeight * 0.16)
+      ),
+    };
+  }
+
+  if (roll < 0.95) {
+    return {
+      type: "reverseWheel",
+      deltaY: -randomInt(40, Math.round(safeViewportHeight * 0.12)),
+    };
+  }
+
+  if (roll < 0.98) {
+    return { type: "pageDown" };
+  }
+
+  return {
+    type: "pause",
+    delayMs: randomInt(15000, 45000),
+  };
 }
 
 async function resolveBookCardTitle(driver, book) {
@@ -295,6 +397,9 @@ function setRuntimeConfigFromEnv(env = process.env, options = {}) {
   WEREAD_HEADLESS = env.WEREAD_HEADLESS === undefined
     ? true
     : parseBooleanValue(env.WEREAD_HEADLESS, true, false);
+  WEREAD_STARTUP_DELAY = env.WEREAD_STARTUP_DELAY === undefined
+    ? 0
+    : parseStartupDelayValue(env.WEREAD_STARTUP_DELAY, 0, options);
   WEREAD_DURATION = env.WEREAD_DURATION === undefined
     ? 10
     : parseDurationValue(env.WEREAD_DURATION, 10, options);
@@ -527,13 +632,129 @@ async function loadCookies(driver, filePath) {
   console.info("Cookies loaded successfully.");
 }
 
-async function pressDownArrow(driver) {
-  await driver.actions().sendKeys(Key.ARROW_DOWN).perform();
+async function pressDownArrow(driver, holdMs = null) {
+  if (typeof driver.keyDown === "function") {
+    await driver.keyDown(Key.ARROW_DOWN);
+  } else {
+    await driver.actions().sendKeys(Key.ARROW_DOWN).perform();
+  }
   // keep the key press short so each step scrolls less aggressively
-  let randomTime = Math.floor(Math.random() * 121) + 40;
+  let randomTime = Number.isInteger(holdMs) ? holdMs : randomInt(40, 160);
   await new Promise((resolve) => setTimeout(resolve, randomTime));
   // release the down arrow key
-  await driver.actions().sendKeys(Key.NULL).perform();
+  if (typeof driver.keyUp === "function") {
+    await driver.keyUp(Key.ARROW_DOWN);
+  } else {
+    await driver.actions().sendKeys(Key.NULL).perform();
+  }
+}
+
+async function getVisibleReadingTextLength(driver) {
+  try {
+    return await driver.executeScript(`
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode(node) {
+            const text = (node.nodeValue || '').trim();
+            if (text.length < 2 || !node.parentElement) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            const style = window.getComputedStyle(node.parentElement);
+            if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const visible = Array.from(range.getClientRects()).some((rect) => (
+              rect.bottom > 0 &&
+              rect.top < window.innerHeight &&
+              rect.right > 0 &&
+              rect.left < window.innerWidth
+            ));
+            range.detach();
+            return visible ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+          }
+        }
+      );
+
+      let node;
+      let length = 0;
+      let count = 0;
+      while ((node = walker.nextNode()) && count < 160) {
+        length += (node.nodeValue || '').trim().length;
+        count += 1;
+        if (length >= 1800) {
+          break;
+        }
+      }
+      return length;
+    `);
+  } catch (error) {
+    console.debug("Could not inspect visible reading text length:", error.message);
+    return 0;
+  }
+}
+
+async function getViewportSize(driver) {
+  try {
+    return await driver.executeScript(`
+      return {
+        width: window.innerWidth || 1200,
+        height: window.innerHeight || 800
+      };
+    `);
+  } catch (_) {
+    return { width: 1200, height: 800 };
+  }
+}
+
+async function moveMouseCasually(driver, viewport) {
+  if (Math.random() >= 0.35 || typeof driver.moveMouse !== "function") {
+    return;
+  }
+
+  const x = randomInt(
+    Math.round(viewport.width * 0.25),
+    Math.round(viewport.width * 0.75)
+  );
+  const y = randomInt(
+    Math.round(viewport.height * 0.25),
+    Math.round(viewport.height * 0.75)
+  );
+  await driver.moveMouse(x, y, randomInt(4, 12));
+}
+
+async function performReadingGesture(driver) {
+  const viewport = await getViewportSize(driver);
+  const plan = createReadingGesturePlan(viewport.height);
+  await moveMouseCasually(driver, viewport);
+
+  if (plan.type === "wheel" || plan.type === "reverseWheel") {
+    if (typeof driver.scrollWheel === "function") {
+      await driver.scrollWheel(plan.deltaY);
+    } else {
+      await driver.executeScript("window.scrollBy({ top: arguments[0], behavior: 'smooth' });", plan.deltaY);
+    }
+    console.debug("Performed reading wheel gesture:", plan.deltaY);
+    return;
+  }
+
+  if (plan.type === "arrowDown") {
+    await pressDownArrow(driver, plan.holdMs);
+    console.debug("Performed reading arrow gesture:", plan.holdMs);
+    return;
+  }
+
+  if (plan.type === "pageDown") {
+    await driver.actions().sendKeys(Key.PAGE_DOWN).perform();
+    console.debug("Performed reading page-down gesture.");
+    return;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, plan.delayMs));
+  console.debug("Performed reading pause:", plan.delayMs);
 }
 
 // Function to check if element is in viewport
@@ -1456,6 +1677,14 @@ async function dispatchCli(argv) {
 }
 
 async function runMain() {
+  const startupDelayMs = getStartupDelayMs();
+  if (startupDelayMs > 0) {
+    console.info(
+      `Startup delay enabled: waiting ${Math.round(startupDelayMs / 1000)} seconds before starting.`
+    );
+    await new Promise((resolve) => setTimeout(resolve, startupDelayMs));
+  }
+
   console.info("Starting the script, datetime: ", new Date());
   let driver;
 
@@ -1731,7 +1960,11 @@ async function runMain() {
     // log last read time per minute
     while (new Date() < endTime) {
       let currentTime = new Date();
-      await new Promise((resolve) => setTimeout(resolve, getReadingStepDelayMs()));
+      const visibleTextLength = await getVisibleReadingTextLength(driver);
+      await new Promise((resolve) => setTimeout(
+        resolve,
+        getReadingStepDelayMs(WEREAD_SPEED, visibleTextLength)
+      ));
       if (currentTime.getMinutes() !== screenshotTime.getMinutes()) {
         // take screenshot every minute, and get round index
         let screenshotIndex = Math.round((currentTime - startTime) / 60000);
@@ -1852,9 +2085,7 @@ async function runMain() {
         continue;
       }
 
-      // press down arrow key if position is greater than 99
-      await pressDownArrow(driver);
-      console.debug("Pressed down arrow key.");
+      await performReadingGesture(driver);
     }
     console.info("Reading completed.");
 
@@ -1905,6 +2136,7 @@ function getRuntimeConfigSnapshot() {
     DEBUG,
     WEREAD_USER,
     WEREAD_HEADLESS,
+    WEREAD_STARTUP_DELAY,
     WEREAD_DURATION,
     WEREAD_SPEED,
     WEREAD_BROWSER,
@@ -1921,7 +2153,10 @@ function getRuntimeConfigSnapshot() {
 module.exports = {
   RUN_OPTION_SPECS,
   applyRunCliOverrides,
+  createReadingGesturePlan,
+  getStartupDelayMs,
   getReadingStepDelayMs,
+  getVisibleTextDelayMultiplier,
   getRuntimeConfigSnapshot,
   parseCliArgs,
   setRuntimeConfigFromEnv,

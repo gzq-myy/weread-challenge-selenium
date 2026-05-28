@@ -39,6 +39,11 @@ function parseKeywords(rawKeywords) {
     .filter((item) => item.length > 0);
 }
 
+function parseStartupDelayConfig(rawValue) {
+  const parsed = Number.parseInt(String(rawValue || '0').trim(), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
 function createRuntimeConfig(env = process.env, options = {}) {
   const duration = parseDurationConfig(env.WEREAD_DURATION || String(DEFAULT_READING_DURATION_MINUTES), options);
 
@@ -53,6 +58,7 @@ function createRuntimeConfig(env = process.env, options = {}) {
     WEREAD_HEADLESS: env.WEREAD_HEADLESS === undefined
       ? true
       : !['false', '0', 'no', 'off'].includes(String(env.WEREAD_HEADLESS).trim().toLowerCase()),
+    WEREAD_STARTUP_DELAY: parseStartupDelayConfig(env.WEREAD_STARTUP_DELAY),
     WEREAD_DURATION: duration,
     WEREAD_SPEED: env.WEREAD_SPEED || 'slow',
     WEREAD_BROWSER: env.WEREAD_BROWSER || 'chrome',
@@ -70,5 +76,6 @@ module.exports = {
   DEFAULT_READING_DURATION_MINUTES,
   parseDurationConfig,
   parseKeywords,
+  parseStartupDelayConfig,
   createRuntimeConfig,
 };

@@ -55,6 +55,7 @@ flowchart TD
 | `--weread-user` | `WEREAD_USER` | 浏览器 profile / 用户标识 |
 | `--weread-browser` | `WEREAD_BROWSER` | 浏览器类型 |
 | `--weread-headless` | `WEREAD_HEADLESS` | 是否以 headless 模式运行 Patchright Chromium |
+| `--weread-startup-delay` | `WEREAD_STARTUP_DELAY` | 任务启动前随机休眠的最大分钟数，`0` 表示不休眠 |
 | `--weread-duration` | `WEREAD_DURATION` | 阅读分钟数 |
 | `--weread-speed` | `WEREAD_SPEED` | 阅读速度：`slow` / `normal` / `fast` |
 | `--weread-screenshot` | `WEREAD_SCREENSHOT` | 阅读期间是否每分钟截图 |

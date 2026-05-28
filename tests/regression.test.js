@@ -1,9 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseDurationConfig, parseKeywords, createRuntimeConfig } = require('../src/config');
+const { parseDurationConfig, parseKeywords, parseStartupDelayConfig, createRuntimeConfig } = require('../src/config');
 const {
+  createReadingGesturePlan,
+  getStartupDelayMs,
   getReadingStepDelayMs,
+  getVisibleTextDelayMultiplier,
   RUN_OPTION_SPECS,
   getRuntimeConfigSnapshot,
   setRuntimeConfigFromEnv,
@@ -114,6 +117,56 @@ test('阅读滚动节奏: slow 默认明显慢于 normal 和 fast', () => {
   }
 });
 
+test('阅读滚动节奏: 可见文本越多停顿越久', () => {
+  const originalRandom = Math.random;
+  try {
+    Math.random = () => 0;
+    assert.equal(getVisibleTextDelayMultiplier(80), 0.8);
+    assert.equal(getVisibleTextDelayMultiplier(400), 1);
+    assert.equal(getVisibleTextDelayMultiplier(800), 1.35);
+    assert.equal(getVisibleTextDelayMultiplier(1300), 1.65);
+    assert.equal(getReadingStepDelayMs('slow', 80), 4800);
+    assert.equal(getReadingStepDelayMs('slow', 1300), 9900);
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+function withRandomSequence(values, fn) {
+  const originalRandom = Math.random;
+  let index = 0;
+  try {
+    Math.random = () => values[Math.min(index++, values.length - 1)];
+    return fn();
+  } finally {
+    Math.random = originalRandom;
+  }
+}
+
+test('阅读滚动手势: 混合 wheel、短按、反向滚动和长停顿', () => {
+  assert.equal(
+    withRandomSequence([0.1, 0], () => createReadingGesturePlan(1000).type),
+    'wheel'
+  );
+  assert.equal(
+    withRandomSequence([0.6, 0], () => createReadingGesturePlan(1000).type),
+    'arrowDown'
+  );
+
+  const reverse = withRandomSequence([0.9, 0], () => createReadingGesturePlan(1000));
+  assert.equal(reverse.type, 'reverseWheel');
+  assert.equal(reverse.deltaY < 0, true);
+
+  assert.equal(
+    withRandomSequence([0.96], () => createReadingGesturePlan(1000).type),
+    'pageDown'
+  );
+  assert.equal(
+    withRandomSequence([0.99, 0], () => createReadingGesturePlan(1000).type),
+    'pause'
+  );
+});
+
 test('数据目录配置: 默认使用 .weread，显式配置时保留覆盖', () => {
   setRuntimeConfigFromEnv({
     WEREAD_DURATION: '10',
@@ -128,6 +181,29 @@ test('数据目录配置: 默认使用 .weread，显式配置时保留覆盖', (
 
   assert.equal(getRuntimeConfigSnapshot().WEREAD_DATA_DIR, './custom-data');
   assert.equal(RUN_OPTION_SPECS.some((spec) => spec.envKey === 'WEREAD_DATA_DIR'), true);
+});
+
+test('启动随机休眠配置: 默认关闭，配置后按最大分钟数计算随机毫秒', () => {
+  assert.equal(parseStartupDelayConfig('10'), 10);
+  assert.equal(parseStartupDelayConfig('-1'), 0);
+  assert.equal(parseStartupDelayConfig('bad'), 0);
+
+  setRuntimeConfigFromEnv({
+    WEREAD_DURATION: '10',
+  }, { quiet: true });
+
+  assert.equal(getRuntimeConfigSnapshot().WEREAD_STARTUP_DELAY, 0);
+  assert.equal(getStartupDelayMs(0, () => 1), 0);
+
+  setRuntimeConfigFromEnv({
+    WEREAD_STARTUP_DELAY: '10',
+    WEREAD_DURATION: '10',
+  }, { quiet: true });
+
+  assert.equal(getRuntimeConfigSnapshot().WEREAD_STARTUP_DELAY, 10);
+  assert.equal(getStartupDelayMs(10, () => 0), 0);
+  assert.equal(getStartupDelayMs(10, () => 1), 600000);
+  assert.equal(RUN_OPTION_SPECS.some((spec) => spec.envKey === 'WEREAD_STARTUP_DELAY'), true);
 });
 
 test('选书配置: 不再暴露 WEREAD_SELECTION，使用 URL 优先和关键词书架匹配', () => {

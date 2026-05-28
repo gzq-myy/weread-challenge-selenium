@@ -49,7 +49,7 @@ docker compose up -d
 - 支持自动阅读
 - 支持跳到下一章
 - 支持读完跳回第一章继续阅读
-- 支持选择阅读速度
+- 支持选择阅读速度，并按可见文本量混合滚轮、短按、少量反向滚动和停顿
 - 随机单页阅读时间
 - 随机翻页时间
 - 每分钟截图当前界面
@@ -398,8 +398,9 @@ mkdir -p $HOME/weread-challenge/$WEREAD_USER2/.weread
 | `DEBUG`                 | `false`          | `true,false`                          | 开启调试日志                                                              |
 | `WEREAD_USER`           | `weread-default` | -                                     | 用户标识                                                                  |
 | `WEREAD_HEADLESS`       | `true`           | `true,false`                          | 是否以 headless 模式运行 Patchright Chromium                              |
+| `WEREAD_STARTUP_DELAY`  | `0`              | -                                     | 任务启动前随机休眠的最大分钟数，`0` 表示不休眠                            |
 | `WEREAD_DURATION`       | `10`             | -                                     | 阅读时长                                                                  |
-| `WEREAD_SPEED`          | `slow`           | `slow,normal,fast`                    | 阅读速度；当前间隔约为 fast 1.5-3 秒，normal 3-6 秒，slow 6-12 秒         |
+| `WEREAD_SPEED`          | `slow`           | `slow,normal,fast`                    | 阅读速度；基础间隔约为 fast 1.5-3 秒，normal 3-6 秒，slow 6-12 秒；可见文本较多时会自动延长 |
 | `WEREAD_SCREENSHOT`     | `true`           | `true,false`                          | 阅读期间每分钟截图                                                        |
 | `WEREAD_DATA_DIR`       | `./.weread`      | -                                     | cookies、登录二维码、日志和截图的数据目录                                 |
 | `DEFAULT_BOOK_URL`      | ""               | -                                     | 指定后直接打开该阅读链接；优先级高于 `WEREAD_KEYWORDS`                    |
